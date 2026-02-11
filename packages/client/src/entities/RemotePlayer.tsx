@@ -1,6 +1,5 @@
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Html } from '@react-three/drei';
 import { useGameStore } from '../stores/game-store.js';
 import { interpolatePlayer, getInterpolationRenderTime } from '../networking/interpolation.js';
 import * as THREE from 'three';
@@ -11,7 +10,7 @@ interface RemotePlayerProps {
   color: string;
 }
 
-export function RemotePlayer({ playerId, name, color }: RemotePlayerProps) {
+export function RemotePlayer({ playerId, color }: RemotePlayerProps) {
   const groupRef = useRef<THREE.Group>(null!);
 
   useFrame(() => {
@@ -42,29 +41,12 @@ export function RemotePlayer({ playerId, name, color }: RemotePlayerProps) {
         position={[0, 1, -0.3]}
         angle={Math.PI / 5}
         penumbra={0.4}
-        intensity={20}
+        intensity={22}
         distance={12}
         castShadow={false}
         color="#ffe4b5"
       />
 
-      {/* Name label */}
-      <Html position={[0, 1.6, 0]} center distanceFactor={10}>
-        <div
-          style={{
-            color: 'white',
-            fontSize: 12,
-            fontWeight: 600,
-            background: 'rgba(0,0,0,0.5)',
-            padding: '2px 8px',
-            borderRadius: 4,
-            whiteSpace: 'nowrap',
-            userSelect: 'none',
-          }}
-        >
-          {name}
-        </div>
-      </Html>
     </group>
   );
 }

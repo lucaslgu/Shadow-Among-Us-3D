@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'react';
 import { useGameStore } from '../stores/game-store.js';
 import { POWER_CONFIGS, PowerType } from '@shadow/shared';
+import { inputState } from '../networking/mouse-state.js';
 import * as s from './styles.js';
 
 function usePowerState() {
@@ -74,6 +76,59 @@ function PowerStatus({ powerConfig, isActive, cooldownEnd, targetId }: {
           Controlling: {targetName} (Arrow Keys)
         </div>
       )}
+    </div>
+  );
+}
+
+function BatteryIndicator() {
+  const [level, setLevel] = useState(1);
+  const [depleted, setDepleted] = useState(false);
+  const [on, setOn] = useState(true);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setLevel(inputState.batteryLevel);
+      setDepleted(inputState.batteryDepleted);
+      setOn(inputState.flashlightOn);
+    }, 100); // 10 Hz polling
+    return () => clearInterval(id);
+  }, []);
+
+  const pct = Math.round(level * 100);
+  const barColor = pct > 50 ? s.colors.success : pct > 20 ? s.colors.warning : s.colors.danger;
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        bottom: 24,
+        right: 24,
+        background: 'rgba(10, 10, 18, 0.85)',
+        border: `1px solid ${s.colors.border}`,
+        borderRadius: 10,
+        padding: '10px 14px',
+        minWidth: 140,
+        pointerEvents: 'auto',
+      }}
+    >
+      <div style={{ fontSize: 11, color: s.colors.textMuted, marginBottom: 4 }}>
+        FLASHLIGHT {on ? '(ON)' : '(OFF)'} [F]
+      </div>
+      {/* Bar background */}
+      <div style={{ width: '100%', height: 10, background: 'rgba(255,255,255,0.1)', borderRadius: 5, overflow: 'hidden' }}>
+        <div
+          style={{
+            width: `${pct}%`,
+            height: '100%',
+            background: barColor,
+            borderRadius: 5,
+            transition: 'width 0.1s linear',
+          }}
+        />
+      </div>
+      <div style={{ fontSize: 11, color: barColor, marginTop: 4, fontWeight: 600, textAlign: 'center' }}>
+        {pct}%{depleted ? ' (RECHARGING)' : ''}
+      </div>
     </div>
   );
 }
@@ -188,6 +243,9 @@ export function GameHUD() {
           EMERGENCY [E]
         </button>
       </div>
+
+      {/* Battery indicator */}
+      <BatteryIndicator />
 
       {/* Crosshair */}
       <div

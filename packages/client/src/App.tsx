@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { GameScene } from './scenes/GameScene.js';
 import { MainMenu } from './ui/MainMenu.js';
 import { CreateRoom } from './ui/CreateRoom.js';
@@ -20,6 +20,18 @@ function RouterSync() {
   useEffect(() => {
     setNavigate((path) => navigate(path));
   }, [navigate]);
+
+  return null;
+}
+
+function GameGuard() {
+  const { roomCode } = useParams<{ roomCode: string }>();
+  const currentRoomCode = useNetworkStore((st) => st.currentRoomCode);
+  const phase = useGameStore((st) => st.phase);
+
+  if (currentRoomCode !== roomCode || (phase !== 'playing' && phase !== 'results')) {
+    return <Navigate to="/" replace />;
+  }
 
   return null;
 }
@@ -129,7 +141,7 @@ export function App() {
         <Route path="/enter-room/:roomCode" element={<EnterRoom />} />
         <Route path="/lobby/:roomCode" element={<Lobby />} />
         {/* No overlay for /game — only GameScene + HUD visible */}
-        <Route path="/game" element={null} />
+        <Route path="/game/:roomCode" element={<GameGuard />} />
       </Routes>
     </div>
   );

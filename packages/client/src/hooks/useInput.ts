@@ -1,11 +1,11 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { mouseState } from '../networking/mouse-state.js';
+import { mouseState, inputState } from '../networking/mouse-state.js';
 
 export interface InputRefs {
   keysRef: React.MutableRefObject<{ forward: boolean; backward: boolean; left: boolean; right: boolean }>;
   mouseRef: React.MutableRefObject<{ x: number; y: number }>;
   arrowKeysRef: React.MutableRefObject<{ forward: boolean; backward: boolean; left: boolean; right: boolean }>;
-  actionRef: React.MutableRefObject<{ power: boolean; powerConsumed: boolean }>;
+  actionRef: React.MutableRefObject<{ power: boolean; powerConsumed: boolean; flashlightOn: boolean }>;
 }
 
 export function useInput(): InputRefs {
@@ -14,7 +14,7 @@ export function useInput(): InputRefs {
   // Arrow keys for Mind Controller dual-control
   const arrowKeysRef = useRef({ forward: false, backward: false, left: false, right: false });
   // Action keys
-  const actionRef = useRef({ power: false, powerConsumed: false });
+  const actionRef = useRef({ power: false, powerConsumed: false, flashlightOn: true });
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -39,6 +39,12 @@ export function useInput(): InputRefs {
             actionRef.current.power = true;
             actionRef.current.powerConsumed = true;
           }
+          break;
+        // Flashlight toggle (F) — blocked while battery is depleted
+        case 'KeyF':
+          if (!actionRef.current.flashlightOn && inputState.batteryDepleted) break;
+          actionRef.current.flashlightOn = !actionRef.current.flashlightOn;
+          inputState.flashlightOn = actionRef.current.flashlightOn;
           break;
       }
     }

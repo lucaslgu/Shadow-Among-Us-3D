@@ -132,8 +132,6 @@ export function activatePower(
 
   // Check cooldown
   if (now < gp.powerCooldownEnd) return false;
-  // Check uses
-  if (gp.powerUsesLeft <= 0) return false;
   // Already active → toggle off
   if (gp.powerActive) {
     deactivatePower(io, roomCode, gp, gamePlayers);
@@ -142,7 +140,6 @@ export function activatePower(
 
   gp.powerActive = true;
   gp.powerActiveEnd = config.duration > 0 ? now + config.duration : 0;
-  gp.powerUsesLeft--;
 
   // Apply power-specific effects
   switch (powerType) {

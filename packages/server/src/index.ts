@@ -290,7 +290,8 @@ io.on('connection', (socket) => {
   socket.on('player:create-room', ({ name, password, maxPlayers }) => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
+    const sess = sessions.get(token);
+    if (!sess) return;
 
     // Leave any existing room first
     if (sess.roomCode) removePlayerFromRoom(token);
@@ -329,7 +330,8 @@ io.on('connection', (socket) => {
   socket.on('player:join', ({ name, roomCode, password }) => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
+    const sess = sessions.get(token);
+    if (!sess) return;
 
     const room = rooms.get(roomCode);
 
@@ -390,7 +392,8 @@ io.on('connection', (socket) => {
   socket.on('player:leave-room', () => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
+    const sess = sessions.get(token);
+    if (!sess) return;
 
     if (sess.roomCode) {
       console.log(`[Server] ${sess.playerName} explicitly left room ${sess.roomCode}`);
@@ -402,8 +405,8 @@ io.on('connection', (socket) => {
   socket.on('player:close-room', () => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
-    if (!sess.roomCode) return;
+    const sess = sessions.get(token);
+    if (!sess || !sess.roomCode) return;
 
     const room = rooms.get(sess.roomCode);
     if (!room || room.hostId !== socket.id) return; // Only host can close
@@ -437,7 +440,8 @@ io.on('connection', (socket) => {
   socket.on('player:ready', ({ ready }) => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
+    const sess = sessions.get(token);
+    if (!sess) return;
     if (!sess.roomCode) return;
     const room = rooms.get(sess.roomCode);
     if (!room || room.phase !== 'lobby') return;
@@ -451,7 +455,8 @@ io.on('connection', (socket) => {
   socket.on('chat:message', ({ text }) => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
+    const sess = sessions.get(token);
+    if (!sess) return;
     if (!sess.roomCode) return;
     const room = rooms.get(sess.roomCode);
     if (!room) return;
@@ -464,7 +469,8 @@ io.on('connection', (socket) => {
   socket.on('player:input', (inputData: InputSnapshot) => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
+    const sess = sessions.get(token);
+    if (!sess) return;
     if (!sess.roomCode) return;
     const room = rooms.get(sess.roomCode);
     if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
@@ -477,7 +483,8 @@ io.on('connection', (socket) => {
   socket.on('power:activate', ({ targetId }) => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
+    const sess = sessions.get(token);
+    if (!sess) return;
     if (!sess.roomCode) return;
     const room = rooms.get(sess.roomCode);
     if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
@@ -490,7 +497,8 @@ io.on('connection', (socket) => {
   socket.on('power:deactivate', () => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
+    const sess = sessions.get(token);
+    if (!sess) return;
     if (!sess.roomCode) return;
     const room = rooms.get(sess.roomCode);
     if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
@@ -503,7 +511,8 @@ io.on('connection', (socket) => {
   socket.on('mind-control:input', (data) => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
+    const sess = sessions.get(token);
+    if (!sess) return;
     if (!sess.roomCode) return;
     const room = rooms.get(sess.roomCode);
     if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
@@ -522,7 +531,8 @@ io.on('connection', (socket) => {
   socket.on('game:start', () => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
+    const sess = sessions.get(token);
+    if (!sess) return;
     if (!sess.roomCode) return;
     const room = rooms.get(sess.roomCode);
     if (!room || room.hostId !== socket.id || room.phase !== 'lobby') return;
@@ -628,7 +638,8 @@ io.on('connection', (socket) => {
   socket.on('player:kick', ({ targetId }) => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
+    const sess = sessions.get(token);
+    if (!sess) return;
     if (!sess.roomCode) return;
 
     const room = rooms.get(sess.roomCode);
@@ -661,7 +672,8 @@ io.on('connection', (socket) => {
   socket.on('player:transfer-host', ({ targetId }) => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
-    const sess = sessions.get(token)!;
+    const sess = sessions.get(token);
+    if (!sess) return;
     if (!sess.roomCode) return;
 
     const room = rooms.get(sess.roomCode);

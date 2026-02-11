@@ -216,7 +216,8 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
       if (playerId) gameStore.setLocalPlayer(playerId);
       gameStore.setLocalRole(role as PlayerRole, power as PowerType, playerInfo);
       gameStore.setPhase('playing');
-      navigateFn?.('/game');
+      const roomCode = get().currentRoomCode;
+      navigateFn?.(`/game/${roomCode}`);
     });
 
     socket.on('game:state-snapshot', (snapshot) => {
