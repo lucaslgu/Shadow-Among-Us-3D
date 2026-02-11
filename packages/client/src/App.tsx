@@ -111,6 +111,31 @@ function GameNetworkBridge() {
     }
   }, [phase, socket, arrowKeysRef, mouseRef]);
 
+  // TODO: remove after testing — debug power cycling with P key
+  useEffect(() => {
+    if (phase !== 'playing' || !socket) return;
+
+    function onKeyDown(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.code === 'KeyP') {
+        socket!.emit('debug:cycle-power');
+      }
+    }
+
+    const onPowerChanged = ({ power }: { power: string }) => {
+      useGameStore.setState({ localPower: power as PowerType });
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    socket.on('debug:power-changed', onPowerChanged as any);
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      socket!.off('debug:power-changed', onPowerChanged as any);
+    };
+  }, [phase, socket]);
+
   return null;
 }
 

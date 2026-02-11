@@ -51,6 +51,7 @@ export interface ClientEvents {
   'meeting:emergency': () => void;
   'vote:cast': (data: { targetId: string | null }) => void;
   'chat:message': (data: { text: string }) => void;
+  'debug:cycle-power': () => void; // TODO: remove after testing
 }
 
 // ===== Server -> Client Events =====
@@ -78,6 +79,7 @@ export interface ServerEvents {
   'vote:result': (data: { ejectedId: string | null; votes: Record<string, string | null> }) => void;
   'game:over': (data: { winner: 'crew' | 'shadow'; roles: Record<string, string> }) => void;
   'chat:message': (data: { playerId: string; text: string }) => void;
+  'debug:power-changed': (data: { power: PowerType }) => void; // TODO: remove after testing
 }
 
 // ===== State Snapshot (sent at 20Hz) =====

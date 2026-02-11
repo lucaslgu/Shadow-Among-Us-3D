@@ -479,6 +479,33 @@ io.on('connection', (socket) => {
     gp.inputQueue.push(inputData);
   });
 
+  // --- DEBUG: Cycle Power (TODO: remove after testing) ---
+  socket.on('debug:cycle-power', () => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess) return;
+    if (!sess.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp) return;
+    // Deactivate current power if active
+    if (gp.powerActive) {
+      deactivatePower(io, room.roomCode, gp, room.gamePlayers);
+    }
+    // Cycle to next power
+    const allPowers = Object.values(PowerType);
+    const currentIdx = allPowers.indexOf(gp.power as PowerType);
+    const nextIdx = (currentIdx + 1) % allPowers.length;
+    gp.power = allPowers[nextIdx];
+    gp.powerCooldownEnd = 0;
+    gp.powerActive = false;
+    gp.powerActiveEnd = 0;
+    socket.emit('debug:power-changed', { power: allPowers[nextIdx] });
+    console.log(`[DEBUG] ${gp.name} power changed to: ${allPowers[nextIdx]}`);
+  });
+
   // --- Power Activate (toggle) ---
   socket.on('power:activate', ({ targetId }) => {
     const token = socketToSession.get(socket.id);
