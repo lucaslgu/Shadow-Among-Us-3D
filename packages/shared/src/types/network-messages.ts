@@ -93,6 +93,7 @@ export interface PlayerSnapshot {
   powerActive: boolean;
   powerCooldownEnd: number;
   mindControlTargetId: string | null;
+  color: string;
 }
 
 export interface StateSnapshot {

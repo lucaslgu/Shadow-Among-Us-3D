@@ -5,6 +5,7 @@ import { useGameStore } from '../stores/game-store.js';
 import { LocalPlayer } from '../entities/LocalPlayer.js';
 import { RemotePlayer } from '../entities/RemotePlayer.js';
 import { ThirdPersonCamera } from '../camera/ThirdPersonCamera.js';
+import { ThreeBodyEnvironment } from '../environment/ThreeBodyEnvironment.js';
 
 // ===== Menu Scene (lobby background) =====
 
@@ -62,12 +63,12 @@ function PlayingScene() {
   const localPlayerId = useGameStore((st) => st.localPlayerId);
   const players = useGameStore((st) => st.players);
 
-  const myColor = localPlayerId ? (playerInfo[localPlayerId]?.color ?? '#ffffff') : '#ffffff';
+  const myColor = (localPlayerId ? (players[localPlayerId]?.color ?? playerInfo[localPlayerId]?.color) : null) ?? '#ffffff';
 
   return (
     <>
-      {/* Very dark ambient — flashlights are the primary light */}
-      <ambientLight intensity={0.02} color="#223355" />
+      {/* Three-Body Problem environmental system (suns, fog, particles, bloom) */}
+      <ThreeBodyEnvironment />
 
       {/* Large floor */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
@@ -88,7 +89,7 @@ function PlayingScene() {
             key={pid}
             playerId={pid}
             name={info.name}
-            color={info.color}
+            color={players[pid]?.color || info.color}
           />
         );
       })}

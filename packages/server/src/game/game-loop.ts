@@ -32,6 +32,8 @@ export interface GamePlayerState {
   mindControlInput: { forward: boolean; backward: boolean; left: boolean; right: boolean; mouseX: number } | null;
   // Original speed (before power modifications)
   baseSpeedMultiplier: number;
+  // Original color (for Metamorph revert)
+  originalColor: string;
 }
 
 export function startGameLoop(
@@ -97,6 +99,7 @@ export function startGameLoop(
         mindControlTargetId: gp.mindControlTargetToken
           ? (findSocketIdByToken(gamePlayers, gp.mindControlTargetToken) ?? null)
           : null,
+        color: gp.color,
       };
     }
 
@@ -177,13 +180,18 @@ export function activatePower(
     }
 
     case PowerType.METAMORPH: {
-      // Copy target's color
+      // Copy a random other player's color (alive or dead)
       const morphTargetToken = targetId
         ? findTokenBySocketId(gamePlayers, targetId)
-        : findNearestPlayerToken(gp, gamePlayers);
-      if (morphTargetToken) {
-        const target = gamePlayers.get(morphTargetToken);
-        if (target) gp.color = target.color;
+        : findRandomOtherPlayerToken(gp, gamePlayers);
+      if (!morphTargetToken) {
+        gp.powerActive = false;
+        return false;
+      }
+      const target = gamePlayers.get(morphTargetToken);
+      if (target) {
+        gp.originalColor = gp.color;
+        gp.color = target.color;
       }
       break;
     }
@@ -271,6 +279,10 @@ export function deactivatePower(
       gp.mindControlInput = null;
       break;
 
+    case PowerType.METAMORPH:
+      gp.color = gp.originalColor;
+      break;
+
     default:
       break;
   }
@@ -283,6 +295,15 @@ function findTokenBySocketId(gamePlayers: Map<string, GamePlayerState>, socketId
     if (gp.socketId === socketId) return token;
   }
   return null;
+}
+
+function findRandomOtherPlayerToken(source: GamePlayerState, gamePlayers: Map<string, GamePlayerState>): string | null {
+  const others: string[] = [];
+  for (const [token, gp] of gamePlayers) {
+    if (gp.socketId !== source.socketId) others.push(token);
+  }
+  if (others.length === 0) return null;
+  return others[Math.floor(Math.random() * others.length)];
 }
 
 function findNearestPlayerToken(source: GamePlayerState, gamePlayers: Map<string, GamePlayerState>): string | null {

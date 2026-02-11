@@ -603,6 +603,7 @@ io.on('connection', (socket) => {
         mindControlTargetToken: null,
         mindControlInput: null,
         baseSpeedMultiplier: 1,
+        originalColor: color,
       };
 
       gamePlayers.set(pToken, gp);

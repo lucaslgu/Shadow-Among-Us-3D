@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGameStore } from '../stores/game-store.js';
 import { mouseState } from '../networking/mouse-state.js';
+import { cameraShakeState } from '../environment/ThreeBodyEnvironment.js';
 
 const EYE_HEIGHT = 1.2;
 
@@ -25,10 +26,11 @@ export function ThirdPersonCamera() {
     camera.position.set(px, py + EYE_HEIGHT, pz);
 
     // FPS camera using Euler angles (YXZ order = yaw first, then pitch)
+    // Camera shake offsets are added from the Three-Body environment system
     camera.rotation.order = 'YXZ';
-    camera.rotation.y = -mouseState.yaw;   // mouse right → positive yaw → camera turns right
-    camera.rotation.x = -mouseState.pitch; // mouse down → positive pitch → camera tilts down
-    camera.rotation.z = 0;
+    camera.rotation.y = -mouseState.yaw + cameraShakeState.offsetY;
+    camera.rotation.x = -mouseState.pitch + cameraShakeState.offsetX;
+    camera.rotation.z = cameraShakeState.offsetZ;
   });
 
   return null;
