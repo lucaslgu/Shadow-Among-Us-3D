@@ -57,7 +57,7 @@ export interface ClientEvents {
   'player:interact': (data: { targetId: string }) => void;
   'rooms:list': (data: { page: number; limit: number }) => void;
   'game:start': () => void;
-  'power:activate': (data: { targetId?: string; locationId?: string; wallPosition?: [number, number]; teleportPosition?: [number, number] }) => void;
+  'power:activate': (data: { targetId?: string; locationId?: string; wallPosition?: [number, number]; teleportPosition?: [number, number]; teleportFromMap?: boolean }) => void;
   'power:deactivate': () => void;
   'power:request-targets': () => void;
   'mind-control:input': (data: { forward: boolean; backward: boolean; left: boolean; right: boolean; mouseX: number }) => void;
@@ -68,7 +68,8 @@ export interface ClientEvents {
   'vote:cast': (data: { targetId: string | null }) => void;
   'chat:message': (data: { text: string }) => void;
   'door:interact': (data: { doorId: string }) => void;
-  'hacker:action': (data: { targetType: 'door' | 'light' | 'wall'; targetId: string }) => void;
+  'door:lock': (data: { doorId: string }) => void;
+  'hacker:action': (data: { targetType: 'door' | 'light' | 'wall' | 'pipe' | 'oxygen_generator' | 'oxygen_drain'; targetId: string }) => void;
   'task:start': (data: { taskId: string }) => void;
   'task:complete': (data: { taskId: string }) => void;
   'task:cancel': (data: { taskId: string }) => void;
@@ -76,7 +77,9 @@ export interface ClientEvents {
   'oxygen:cancel-refill': () => void;
   'oxygen:complete-refill': (data: { generatorId: string }) => void;
   'player:loaded': () => void;
-  'debug:cycle-power': () => void; // TODO: remove after testing
+  'debug:cycle-power': () => void;
+  'debug:toggle-role': () => void;
+  'debug:self-kill': () => void;
   // Ghost events
   'ghost:possess': (data: { targetId: string }) => void;
   'ghost:release-possess': () => void;
@@ -88,6 +91,7 @@ export interface ClientEvents {
   // Pipe system events
   'pipe:enter': (data: { pipeNodeId: string }) => void;
   'pipe:exit': (data: { pipeNodeId: string }) => void;
+  'pipe:lock': (data: { pipeNodeId: string }) => void;
   // Death choice (ghost, lobby, leave)
   'death:choice': (data: { choice: 'ghost' | 'lobby' | 'leave' }) => void;
 }
@@ -98,7 +102,7 @@ export interface ServerEvents {
   'connection:welcome': (data: { playerId: string; sessionToken: string }) => void;
   'room:created': (data: { roomCode: string }) => void;
   'room:joined': (data: { gameState: SerializedGameState; lobbyPlayers: LobbyPlayer[] }) => void;
-  'room:reconnected': (data: { gameState: SerializedGameState; lobbyPlayers: LobbyPlayer[] }) => void;
+  'room:reconnected': (data: { gameState: SerializedGameState; lobbyPlayers: LobbyPlayer[]; gameData?: { role: string; power: PowerType; playerInfo: Record<string, { name: string; color: string }>; mazeLayout: MazeLayout; cosmicScenario: CosmicScenario; assignedTasks: string[]; devMode?: boolean } }) => void;
   'room:error': (data: { message: string }) => void;
   'room:players': (data: { players: LobbyPlayer[] }) => void;
   'room:kicked': (data: { reason: string }) => void;
@@ -107,7 +111,7 @@ export interface ServerEvents {
   'player:joined': (data: { player: PlayerState }) => void;
   'player:left': (data: { playerId: string }) => void;
   'player:ready': (data: { playerId: string; ready: boolean }) => void;
-  'game:started': (data: { role: string; power: PowerType; playerInfo: Record<string, { name: string; color: string }>; mazeLayout: MazeLayout; cosmicScenario: CosmicScenario; assignedTasks: string[] }) => void;
+  'game:started': (data: { role: string; power: PowerType; playerInfo: Record<string, { name: string; color: string }>; mazeLayout: MazeLayout; cosmicScenario: CosmicScenario; assignedTasks: string[]; devMode?: boolean }) => void;
   'game:state-snapshot': (data: StateSnapshot) => void;
   'game:phase-change': (data: { phase: GamePhase }) => void;
   'power:activated': (data: { playerId: string; powerType: PowerType; targetId?: string; copiedPower?: PowerType }) => void;
@@ -133,7 +137,8 @@ export interface ServerEvents {
   'task:cancelled': (data: { taskId: string; playerId: string }) => void;
   'task:start-failed': (data: { taskId: string; reason: string }) => void;
   'game:loading-progress': (data: { loadedPlayerIds: string[]; totalPlayers: number }) => void;
-  'debug:power-changed': (data: { power: PowerType }) => void; // TODO: remove after testing
+  'debug:power-changed': (data: { power: PowerType }) => void;
+  'debug:role-changed': (data: { role: string; power: PowerType }) => void;
   'ghost:death-screen': (data: { cause: string; killerId: string | null }) => void;
 }
 
@@ -150,6 +155,7 @@ export interface PlayerSnapshot {
   speedMultiplier: number;
   lastProcessedInput: number;
   powerActive: boolean;
+  powerActiveEnd: number;
   powerCooldownEnd: number;
   mindControlTargetId: string | null;
   color: string;
@@ -162,8 +168,11 @@ export interface PlayerSnapshot {
   isGhost: boolean;
   ghostPossessTargetId: string | null;
   powerUsesLeft: number;
+  metamorphEndTime: number; // 0 when not metamorphed, timestamp when transformation ends
   isUnderground: boolean;
   currentPipeNodeId: string | null;
+  undergroundTimeLeft: number; // seconds remaining (0 when on surface)
+  pipeCooldownEnd: number; // timestamp when pipe re-entry is allowed (0 = no cooldown)
 }
 
 export interface StateSnapshot {

@@ -306,7 +306,7 @@ export function TeleportMapOverlay() {
     const socket = useNetworkStore.getState().socket;
     if (socket) {
       playTeleport();
-      socket.emit('power:activate', { teleportPosition: [clampedX, clampedZ] });
+      socket.emit('power:activate', { teleportPosition: [clampedX, clampedZ], teleportFromMap: true });
     }
 
     useGameStore.getState().closeTeleportMap();

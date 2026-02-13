@@ -87,7 +87,7 @@ function GameNetworkBridge() {
               ? { walls: [] as any[], doorStates: {}, dynamicWallStates: {}, pipeWalls: mazeLayout.pipeWalls }
               : { walls: mazeLayout.walls, doorStates: mazeSnapshot.doorStates, dynamicWallStates: mazeSnapshot.dynamicWallStates, muralhaWalls: mazeSnapshot.muralhaWalls }
             : undefined;
-          const basePos = applyMovement(gameStore.localPosition, input, 1 / 20, undefined, collisionCtx);
+          const basePos = applyMovement(gameStore.localPosition, input, 1 / 20, eraPhysicsState.gravitySpeedFactor, collisionCtx);
           const newRot = yawToQuaternion(input.mouseX);
 
           // Ice sliding: add momentum on slippery floor
@@ -356,28 +356,37 @@ function GameNetworkBridge() {
     };
   }, [phase, socket]);
 
-  // TODO: remove after testing — debug power cycling with P key
+  // Dev mode debug keys (P: cycle power, T: toggle role, K: self-kill)
   useEffect(() => {
     if (phase !== 'playing' || !socket) return;
+    const devMode = useGameStore.getState().devMode;
+    if (!devMode) return;
 
     function onKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (e.code === 'KeyP') {
-        socket!.emit('debug:cycle-power');
+      switch (e.code) {
+        case 'KeyP': socket!.emit('debug:cycle-power'); break;
+        case 'KeyT': socket!.emit('debug:toggle-role'); break;
+        case 'KeyK': socket!.emit('debug:self-kill'); break;
       }
     }
 
     const onPowerChanged = ({ power }: { power: string }) => {
       useGameStore.setState({ localPower: power as PowerType });
     };
+    const onRoleChanged = ({ role, power }: { role: string; power: string }) => {
+      useGameStore.setState({ localRole: role as 'crew' | 'shadow', localPower: power as PowerType });
+    };
 
     window.addEventListener('keydown', onKeyDown);
     socket.on('debug:power-changed', onPowerChanged as any);
+    socket.on('debug:role-changed', onRoleChanged as any);
 
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       socket!.off('debug:power-changed', onPowerChanged as any);
+      socket!.off('debug:role-changed', onRoleChanged as any);
     };
   }, [phase, socket]);
 

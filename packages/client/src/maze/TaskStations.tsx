@@ -1,4 +1,4 @@
-import { useRef, useMemo, useEffect, useState } from 'react';
+import { useRef, useMemo, useEffect, useState, memo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { TaskStationInfo, TaskVisualCategory } from '@shadow/shared';
@@ -21,369 +21,331 @@ const COL_DONE = new THREE.Color('#22cc55');
 const COL_GLOW_PENDING = new THREE.Color('#3388ff');
 const COL_GLOW_DONE = new THREE.Color('#44ee66');
 
-// ── Material cache (shared across all task types) ──
+// ── Material cache (module-level singletons — NOT recreated per mount) ──
 const MAT = {
-  darkMetal: { color: '#1a1e28', roughness: 0.2, metalness: 0.9 },
-  midMetal: { color: '#2a303e', roughness: 0.25, metalness: 0.85 },
-  lightMetal: { color: '#3a424e', roughness: 0.3, metalness: 0.8 },
-  panel: { color: '#101520', roughness: 0.15, metalness: 0.7 },
-  accent: { color: '#1a3050', roughness: 0.3, metalness: 0.6 },
-  rubber: { color: '#0c0c0c', roughness: 0.8, metalness: 0.1 },
-  warn: { color: '#ccaa00', roughness: 0.5, metalness: 0.3 },
-} as const;
+  darkMetal: new THREE.MeshStandardMaterial({ color: '#1a1e28', roughness: 0.2, metalness: 0.9 }),
+  midMetal: new THREE.MeshStandardMaterial({ color: '#2a303e', roughness: 0.25, metalness: 0.85 }),
+  lightMetal: new THREE.MeshStandardMaterial({ color: '#3a424e', roughness: 0.3, metalness: 0.8 }),
+  panel: new THREE.MeshStandardMaterial({ color: '#101520', roughness: 0.15, metalness: 0.7 }),
+  accent: new THREE.MeshStandardMaterial({ color: '#1a3050', roughness: 0.3, metalness: 0.6 }),
+  rubber: new THREE.MeshStandardMaterial({ color: '#0c0c0c', roughness: 0.8, metalness: 0.1 }),
+  warn: new THREE.MeshStandardMaterial({ color: '#ccaa00', roughness: 0.5, metalness: 0.3 }),
+  // Scanner
+  glassTube: new THREE.MeshStandardMaterial({ color: '#1a3044', transparent: true, opacity: 0.15, roughness: 0.05, metalness: 0.3, side: THREE.DoubleSide }),
+  scanBeam: new THREE.MeshStandardMaterial({ color: '#00ffcc', emissive: new THREE.Color('#00ffcc'), emissiveIntensity: 1.5, transparent: true, opacity: 0.4, toneMapped: false }),
+  scanPadScreen: new THREE.MeshStandardMaterial({ color: '#003322', emissive: new THREE.Color('#00ff88'), emissiveIntensity: 0.4, toneMapped: false }),
+  scanLed: new THREE.MeshStandardMaterial({ color: '#00ffaa', emissive: new THREE.Color('#00ffaa'), emissiveIntensity: 1, toneMapped: false }),
+  scanScreen: new THREE.MeshStandardMaterial({ color: '#001122', emissive: new THREE.Color('#0088ff'), emissiveIntensity: 0.8, toneMapped: false }),
+  // Trash
+  greenBin: new THREE.MeshStandardMaterial({ color: '#1a3022', roughness: 0.3, metalness: 0.7 }),
+  greenBinRim: new THREE.MeshStandardMaterial({ color: '#224030', roughness: 0.25, metalness: 0.7 }),
+  // Energy panel
+  switchGreen: new THREE.MeshStandardMaterial({ color: '#44ff44', emissive: new THREE.Color('#44ff44'), emissiveIntensity: 0.5, toneMapped: false }),
+  switchRed: new THREE.MeshStandardMaterial({ color: '#ff4444', emissive: new THREE.Color('#ff4444'), emissiveIntensity: 0.5, toneMapped: false }),
+  gaugeFace: new THREE.MeshStandardMaterial({ color: '#0a0a0a', roughness: 0.1, metalness: 0.5 }),
+  gaugeNeedle: new THREE.MeshStandardMaterial({ color: '#ff3333', emissive: new THREE.Color('#ff3333'), emissiveIntensity: 0.6, toneMapped: false }),
+  warnLight: new THREE.MeshStandardMaterial({ color: '#ff2200', emissive: new THREE.Color('#ff2200'), emissiveIntensity: 1, toneMapped: false }),
+  // Cannon
+  barrelTip: new THREE.MeshStandardMaterial({ color: '#ff4400', emissive: new THREE.Color('#ff4400'), emissiveIntensity: 0.6, toneMapped: false }),
+  scopeGlow: new THREE.MeshStandardMaterial({ color: '#ff3300', emissive: new THREE.Color('#ff3300'), emissiveIntensity: 1, toneMapped: false }),
+  targetScreen: new THREE.MeshStandardMaterial({ color: '#001100', emissive: new THREE.Color('#ff8800'), emissiveIntensity: 0.6, toneMapped: false }),
+  // Card reader
+  cardScreen: new THREE.MeshStandardMaterial({ color: '#001133', emissive: new THREE.Color('#2266ff'), emissiveIntensity: 0.7, toneMapped: false }),
+  cardSlot: new THREE.MeshStandardMaterial({ color: '#050505', roughness: 0.9, metalness: 0.1 }),
+  slotGuide: new THREE.MeshStandardMaterial({ color: '#33aaff', emissive: new THREE.Color('#33aaff'), emissiveIntensity: 0.5, toneMapped: false }),
+  keypad: new THREE.MeshStandardMaterial({ color: '#1a2030', roughness: 0.4, metalness: 0.5 }),
+  ledGreen: new THREE.MeshStandardMaterial({ color: '#00ff44', emissive: new THREE.Color('#00ff44'), emissiveIntensity: 1, toneMapped: false }),
+  // Engine
+  fan: new THREE.MeshStandardMaterial({ color: '#445566', roughness: 0.15, metalness: 0.9 }),
+  btnGreen: new THREE.MeshStandardMaterial({ color: '#44ff44', emissive: new THREE.Color('#44ff44'), emissiveIntensity: 0.6, toneMapped: false }),
+  btnRed: new THREE.MeshStandardMaterial({ color: '#ff4444', emissive: new THREE.Color('#ff4444'), emissiveIntensity: 0.6, toneMapped: false }),
+  btnAmber: new THREE.MeshStandardMaterial({ color: '#ffaa00', emissive: new THREE.Color('#ffaa00'), emissiveIntensity: 0.6, toneMapped: false }),
+  // Terminal
+  monitorBezel: new THREE.MeshStandardMaterial({ color: '#0a0a0a', roughness: 0.15, metalness: 0.8 }),
+  monitorScreen: new THREE.MeshStandardMaterial({ color: '#000d1a', emissive: new THREE.Color('#1155cc'), emissiveIntensity: 0.7, toneMapped: false }),
+  keyboard: new THREE.MeshStandardMaterial({ color: '#0c0c0c', roughness: 0.7, metalness: 0.3 }),
+  cpuLed: new THREE.MeshStandardMaterial({ color: '#00ff44', emissive: new THREE.Color('#00ff44'), emissiveIntensity: 1.5, toneMapped: false }),
+};
+
+const BTN_MATS = [MAT.btnGreen, MAT.btnRed, MAT.btnAmber];
 
 // ══════════════════════════════════════════════════════════════
 // Per-type detailed visuals
 // ══════════════════════════════════════════════════════════════
 
-function ScannerVisual({ pos }: { pos: [number, number, number] }) {
+const ScannerVisual = memo(function ScannerVisual({ pos }: { pos: [number, number, number] }) {
   const beamRef = useRef<THREE.Mesh>(null);
-  const ledRef = useRef<THREE.Mesh>(null);
   const [x, , z] = pos;
 
   useFrame(({ clock }) => {
     const t = clock.getElapsedTime();
     if (beamRef.current) beamRef.current.position.y = 0.8 + Math.sin(t * 2) * 0.4;
-    if (ledRef.current) {
-      (ledRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
-        0.5 + Math.sin(t * 3) * 0.5;
-    }
+    MAT.scanLed.emissiveIntensity = 0.5 + Math.sin(t * 3) * 0.5;
   });
 
   return (
     <group position={[x, 0, z]}>
       {/* Base platform */}
-      <mesh position={[0, 0.05, 0]}>
+      <mesh position={[0, 0.05, 0]} material={MAT.darkMetal}>
         <cylinderGeometry args={[0.6, 0.65, 0.1, 8]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
       {/* Vertical column */}
-      <mesh position={[0, 0.8, -0.25]}>
+      <mesh position={[0, 0.8, -0.25]} material={MAT.midMetal}>
         <boxGeometry args={[0.12, 1.5, 0.12]} />
-        <meshStandardMaterial {...MAT.midMetal} />
       </mesh>
       {/* Support arm (horizontal) */}
-      <mesh position={[0, 1.2, -0.1]}>
+      <mesh position={[0, 1.2, -0.1]} material={MAT.lightMetal}>
         <boxGeometry args={[0.08, 0.08, 0.4]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
       {/* Scanning pod (glass tube) */}
-      <mesh position={[0, 0.8, 0]}>
+      <mesh position={[0, 0.8, 0]} material={MAT.glassTube}>
         <cylinderGeometry args={[0.35, 0.35, 1.2, 16, 1, true]} />
-        <meshStandardMaterial color="#1a3044" transparent opacity={0.15} roughness={0.05} metalness={0.3} side={THREE.DoubleSide} />
       </mesh>
       {/* Scanning beam (animated) */}
-      <mesh ref={beamRef} position={[0, 0.8, 0]}>
+      <mesh ref={beamRef} position={[0, 0.8, 0]} material={MAT.scanBeam}>
         <cylinderGeometry args={[0.3, 0.3, 0.02, 16]} />
-        <meshStandardMaterial color="#00ffcc" emissive="#00ffcc" emissiveIntensity={1.5} transparent opacity={0.4} toneMapped={false} />
       </mesh>
       {/* Hand scanner pad */}
-      <mesh position={[0.35, 0.7, 0.1]} rotation={[0.3, 0, 0.2]}>
+      <mesh position={[0.35, 0.7, 0.1]} rotation={[0.3, 0, 0.2]} material={MAT.panel}>
         <boxGeometry args={[0.2, 0.04, 0.3]} />
-        <meshStandardMaterial {...MAT.panel} />
       </mesh>
-      <mesh position={[0.35, 0.725, 0.1]} rotation={[0.3, 0, 0.2]}>
+      <mesh position={[0.35, 0.725, 0.1]} rotation={[0.3, 0, 0.2]} material={MAT.scanPadScreen}>
         <boxGeometry args={[0.15, 0.005, 0.2]} />
-        <meshStandardMaterial color="#003322" emissive="#00ff88" emissiveIntensity={0.4} toneMapped={false} />
       </mesh>
       {/* Top cap */}
-      <mesh position={[0, 1.42, 0]}>
+      <mesh position={[0, 1.42, 0]} material={MAT.darkMetal}>
         <cylinderGeometry args={[0.38, 0.35, 0.06, 16]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
       {/* LED indicator */}
-      <mesh ref={ledRef} position={[0, 1.56, -0.25]}>
+      <mesh position={[0, 1.56, -0.25]} material={MAT.scanLed}>
         <sphereGeometry args={[0.04, 8, 8]} />
-        <meshStandardMaterial color="#00ffaa" emissive="#00ffaa" emissiveIntensity={1} toneMapped={false} />
       </mesh>
       {/* Screen on column */}
-      <mesh position={[0, 1.3, -0.19]}>
+      <mesh position={[0, 1.3, -0.19]} material={MAT.scanScreen}>
         <boxGeometry args={[0.18, 0.12, 0.02]} />
-        <meshStandardMaterial color="#001122" emissive="#0088ff" emissiveIntensity={0.8} toneMapped={false} />
       </mesh>
     </group>
   );
-}
+});
 
-function TrashVisual({ pos }: { pos: [number, number, number] }) {
+const TrashVisual = memo(function TrashVisual({ pos }: { pos: [number, number, number] }) {
   const [x, , z] = pos;
   return (
     <group position={[x, 0, z]}>
       {/* Main bin */}
-      <mesh position={[0, 0.4, 0]}>
+      <mesh position={[0, 0.4, 0]} material={MAT.midMetal}>
         <cylinderGeometry args={[0.28, 0.32, 0.8, 10]} />
-        <meshStandardMaterial {...MAT.midMetal} />
       </mesh>
       {/* Bin rim */}
-      <mesh position={[0, 0.82, 0]}>
+      <mesh position={[0, 0.82, 0]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.32, 0.3, 0.04, 10]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
       {/* Recycling bin (smaller, green-tinted) */}
-      <mesh position={[0.45, 0.3, 0]}>
+      <mesh position={[0.45, 0.3, 0]} material={MAT.greenBin}>
         <cylinderGeometry args={[0.2, 0.22, 0.6, 8]} />
-        <meshStandardMaterial color="#1a3022" roughness={0.3} metalness={0.7} />
       </mesh>
-      <mesh position={[0.45, 0.62, 0]}>
+      <mesh position={[0.45, 0.62, 0]} material={MAT.greenBinRim}>
         <cylinderGeometry args={[0.23, 0.21, 0.04, 8]} />
-        <meshStandardMaterial color="#224030" roughness={0.25} metalness={0.7} />
       </mesh>
       {/* Chute/funnel above */}
-      <mesh position={[0, 1.3, 0]} rotation={[0, 0, 0]}>
+      <mesh position={[0, 1.3, 0]} material={MAT.darkMetal}>
         <cylinderGeometry args={[0.15, 0.35, 0.5, 8]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      {/* Chute pipe (connects chute to ceiling area) */}
-      <mesh position={[0, 1.8, 0]}>
+      {/* Chute pipe */}
+      <mesh position={[0, 1.8, 0]} material={MAT.darkMetal}>
         <cylinderGeometry args={[0.12, 0.12, 0.6, 8]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
       {/* Foot pedal */}
-      <mesh position={[0.15, 0.04, 0.32]}>
+      <mesh position={[0.15, 0.04, 0.32]} material={MAT.rubber}>
         <boxGeometry args={[0.12, 0.04, 0.15]} />
-        <meshStandardMaterial {...MAT.rubber} />
       </mesh>
       {/* Pedal arm */}
-      <mesh position={[0.15, 0.08, 0.24]} rotation={[0.3, 0, 0]}>
+      <mesh position={[0.15, 0.08, 0.24]} rotation={[0.3, 0, 0]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.015, 0.015, 0.2, 4]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
       {/* Warning stripe */}
-      <mesh position={[0, 0.45, 0.29]}>
+      <mesh position={[0, 0.45, 0.29]} material={MAT.warn}>
         <boxGeometry args={[0.2, 0.06, 0.005]} />
-        <meshStandardMaterial {...MAT.warn} />
       </mesh>
     </group>
   );
-}
+});
 
-function EnergyPanelVisual({ pos }: { pos: [number, number, number] }) {
-  const warnRef = useRef<THREE.Mesh>(null);
+const EnergyPanelVisual = memo(function EnergyPanelVisual({ pos }: { pos: [number, number, number] }) {
   const [x, , z] = pos;
 
   useFrame(({ clock }) => {
-    if (warnRef.current) {
-      const t = clock.getElapsedTime();
-      (warnRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
-        Math.sin(t * 5) > 0 ? 2.0 : 0.2;
-    }
+    MAT.warnLight.emissiveIntensity = Math.sin(clock.getElapsedTime() * 5) > 0 ? 2.0 : 0.2;
   });
 
   return (
     <group position={[x, 0, z]}>
       {/* Floor transformer box */}
-      <mesh position={[0.3, 0.2, 0]}>
+      <mesh position={[0.3, 0.2, 0]} material={MAT.darkMetal}>
         <boxGeometry args={[0.3, 0.4, 0.25]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      {/* Cable conduit (floor to panel) */}
-      <mesh position={[0.15, 0.6, 0]}>
+      {/* Cable conduit */}
+      <mesh position={[0.15, 0.6, 0]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.03, 0.03, 0.9, 6]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
       {/* Main panel body */}
-      <mesh position={[0, 1.15, 0]}>
+      <mesh position={[0, 1.15, 0]} material={MAT.midMetal}>
         <boxGeometry args={[0.9, 1.1, 0.12]} />
-        <meshStandardMaterial {...MAT.midMetal} />
       </mesh>
-      {/* Panel door (slightly open) */}
-      <mesh position={[-0.02, 1.15, 0.07]}>
+      {/* Panel door */}
+      <mesh position={[-0.02, 1.15, 0.07]} material={MAT.lightMetal}>
         <boxGeometry args={[0.82, 1.0, 0.03]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
       {/* Switch row (5 switches) */}
       {[-0.25, -0.12, 0, 0.12, 0.25].map((ox, i) => (
-        <mesh key={`sw${i}`} position={[ox, 1.3, 0.1]}>
+        <mesh key={`sw${i}`} position={[ox, 1.3, 0.1]} material={i % 2 === 0 ? MAT.switchGreen : MAT.switchRed}>
           <boxGeometry args={[0.06, 0.1, 0.04]} />
-          <meshStandardMaterial
-            color={i % 2 === 0 ? '#44ff44' : '#ff4444'}
-            emissive={i % 2 === 0 ? '#44ff44' : '#ff4444'}
-            emissiveIntensity={0.5}
-            toneMapped={false}
-          />
         </mesh>
       ))}
       {/* Voltage meter */}
-      <mesh position={[0, 0.9, 0.1]}>
+      <mesh position={[0, 0.9, 0.1]} material={MAT.gaugeFace}>
         <cylinderGeometry args={[0.1, 0.1, 0.03, 16]} />
-        <meshStandardMaterial color="#0a0a0a" roughness={0.1} metalness={0.5} />
       </mesh>
-      <mesh position={[0, 0.9, 0.12]}>
+      <mesh position={[0, 0.9, 0.12]} material={MAT.gaugeNeedle}>
         <boxGeometry args={[0.005, 0.08, 0.01]} />
-        <meshStandardMaterial color="#ff3333" emissive="#ff3333" emissiveIntensity={0.8} toneMapped={false} />
       </mesh>
       {/* Warning light */}
-      <mesh ref={warnRef} position={[0.35, 1.6, 0.06]}>
+      <mesh position={[0.35, 1.6, 0.06]} material={MAT.warnLight}>
         <sphereGeometry args={[0.05, 8, 8]} />
-        <meshStandardMaterial color="#ff2200" emissive="#ff2200" emissiveIntensity={1} toneMapped={false} />
       </mesh>
       {/* Danger label */}
-      <mesh position={[0, 0.7, 0.1]}>
+      <mesh position={[0, 0.7, 0.1]} material={MAT.warn}>
         <boxGeometry args={[0.3, 0.06, 0.005]} />
-        <meshStandardMaterial {...MAT.warn} />
       </mesh>
-      {/* Panel mounting bracket */}
-      <mesh position={[-0.48, 1.15, 0.04]}>
+      {/* Panel mounting brackets */}
+      <mesh position={[-0.48, 1.15, 0.04]} material={MAT.darkMetal}>
         <boxGeometry args={[0.04, 0.6, 0.1]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      <mesh position={[0.48, 1.15, 0.04]}>
+      <mesh position={[0.48, 1.15, 0.04]} material={MAT.darkMetal}>
         <boxGeometry args={[0.04, 0.6, 0.1]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
     </group>
   );
-}
+});
 
-function AsteroidCannonVisual({ pos }: { pos: [number, number, number] }) {
-  const scopeRef = useRef<THREE.Mesh>(null);
+const AsteroidCannonVisual = memo(function AsteroidCannonVisual({ pos }: { pos: [number, number, number] }) {
   const [x, , z] = pos;
 
   useFrame(({ clock }) => {
-    if (scopeRef.current) {
-      (scopeRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
-        0.8 + Math.sin(clock.getElapsedTime() * 2) * 0.4;
-    }
+    MAT.scopeGlow.emissiveIntensity = 0.8 + Math.sin(clock.getElapsedTime() * 2) * 0.4;
   });
 
   return (
     <group position={[x, 0, z]}>
       {/* Heavy base platform */}
-      <mesh position={[0, 0.08, 0]}>
+      <mesh position={[0, 0.08, 0]} material={MAT.darkMetal}>
         <cylinderGeometry args={[0.55, 0.6, 0.16, 10]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
       {/* Turret rotation ring */}
-      <mesh position={[0, 0.2, 0]}>
+      <mesh position={[0, 0.2, 0]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.45, 0.5, 0.08, 12]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
       {/* Turret body */}
-      <mesh position={[0, 0.42, 0]}>
+      <mesh position={[0, 0.42, 0]} material={MAT.midMetal}>
         <boxGeometry args={[0.6, 0.35, 0.5]} />
-        <meshStandardMaterial {...MAT.midMetal} />
       </mesh>
       {/* Twin barrels */}
-      <mesh position={[-0.12, 0.45, 0.55]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[-0.12, 0.45, 0.55]} rotation={[Math.PI / 2, 0, 0]} material={MAT.darkMetal}>
         <cylinderGeometry args={[0.06, 0.06, 0.7, 8]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      <mesh position={[0.12, 0.45, 0.55]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[0.12, 0.45, 0.55]} rotation={[Math.PI / 2, 0, 0]} material={MAT.darkMetal}>
         <cylinderGeometry args={[0.06, 0.06, 0.7, 8]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
       {/* Barrel tips (glowing) */}
-      <mesh position={[-0.12, 0.45, 0.92]}>
+      <mesh position={[-0.12, 0.45, 0.92]} material={MAT.barrelTip}>
         <cylinderGeometry args={[0.07, 0.065, 0.03, 8]} />
-        <meshStandardMaterial color="#ff4400" emissive="#ff4400" emissiveIntensity={0.6} toneMapped={false} />
       </mesh>
-      <mesh position={[0.12, 0.45, 0.92]}>
+      <mesh position={[0.12, 0.45, 0.92]} material={MAT.barrelTip}>
         <cylinderGeometry args={[0.07, 0.065, 0.03, 8]} />
-        <meshStandardMaterial color="#ff4400" emissive="#ff4400" emissiveIntensity={0.6} toneMapped={false} />
       </mesh>
       {/* Targeting scope */}
-      <mesh position={[0, 0.65, 0.1]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0.65, 0.1]} rotation={[Math.PI / 2, 0, 0]} material={MAT.darkMetal}>
         <cylinderGeometry args={[0.04, 0.04, 0.2, 6]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      <mesh ref={scopeRef} position={[0, 0.65, 0.22]}>
+      <mesh position={[0, 0.65, 0.22]} material={MAT.scopeGlow}>
         <sphereGeometry args={[0.055, 8, 8]} />
-        <meshStandardMaterial color="#ff3300" emissive="#ff3300" emissiveIntensity={1} toneMapped={false} />
       </mesh>
       {/* Ammo drum */}
-      <mesh position={[-0.38, 0.35, 0.1]}>
+      <mesh position={[-0.38, 0.35, 0.1]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.12, 0.12, 0.25, 8]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
       {/* Targeting screen */}
-      <mesh position={[0.35, 0.55, -0.1]}>
+      <mesh position={[0.35, 0.55, -0.1]} material={MAT.targetScreen}>
         <boxGeometry args={[0.22, 0.16, 0.03]} />
-        <meshStandardMaterial color="#001100" emissive="#ff8800" emissiveIntensity={0.6} toneMapped={false} />
       </mesh>
-      {/* Seat (simple chair) */}
-      <mesh position={[0, 0.25, -0.5]}>
+      {/* Seat */}
+      <mesh position={[0, 0.25, -0.5]} material={MAT.rubber}>
         <boxGeometry args={[0.35, 0.06, 0.35]} />
-        <meshStandardMaterial {...MAT.rubber} />
       </mesh>
-      <mesh position={[0, 0.15, -0.5]}>
+      <mesh position={[0, 0.15, -0.5]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.05, 0.08, 0.2, 6]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
     </group>
   );
-}
+});
 
-function CardReaderVisual({ pos }: { pos: [number, number, number] }) {
-  const ledRef = useRef<THREE.Mesh>(null);
+const CardReaderVisual = memo(function CardReaderVisual({ pos }: { pos: [number, number, number] }) {
   const [x, , z] = pos;
 
   useFrame(({ clock }) => {
-    if (ledRef.current) {
-      (ledRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
-        0.3 + Math.sin(clock.getElapsedTime() * 1.5) * 0.7;
-    }
+    MAT.ledGreen.emissiveIntensity = 0.3 + Math.sin(clock.getElapsedTime() * 1.5) * 0.7;
   });
 
   return (
     <group position={[x, 0, z]}>
       {/* Pedestal base */}
-      <mesh position={[0, 0.15, 0]}>
+      <mesh position={[0, 0.15, 0]} material={MAT.darkMetal}>
         <boxGeometry args={[0.35, 0.3, 0.2]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
       {/* Pedestal column */}
-      <mesh position={[0, 0.55, 0]}>
+      <mesh position={[0, 0.55, 0]} material={MAT.midMetal}>
         <boxGeometry args={[0.12, 0.5, 0.12]} />
-        <meshStandardMaterial {...MAT.midMetal} />
       </mesh>
       {/* Terminal body */}
-      <mesh position={[0, 1.05, 0]}>
+      <mesh position={[0, 1.05, 0]} material={MAT.midMetal}>
         <boxGeometry args={[0.45, 0.7, 0.18]} />
-        <meshStandardMaterial {...MAT.midMetal} />
       </mesh>
       {/* Screen */}
-      <mesh position={[0, 1.15, 0.1]}>
+      <mesh position={[0, 1.15, 0.1]} material={MAT.cardScreen}>
         <boxGeometry args={[0.35, 0.25, 0.02]} />
-        <meshStandardMaterial color="#001133" emissive="#2266ff" emissiveIntensity={0.7} toneMapped={false} />
       </mesh>
       {/* Card slot */}
-      <mesh position={[0, 0.88, 0.1]}>
+      <mesh position={[0, 0.88, 0.1]} material={MAT.cardSlot}>
         <boxGeometry args={[0.28, 0.03, 0.06]} />
-        <meshStandardMaterial color="#050505" roughness={0.9} metalness={0.1} />
       </mesh>
       {/* Slot guide arrows */}
-      <mesh position={[-0.18, 0.88, 0.1]}>
+      <mesh position={[-0.18, 0.88, 0.1]} material={MAT.slotGuide}>
         <boxGeometry args={[0.02, 0.015, 0.04]} />
-        <meshStandardMaterial color="#33aaff" emissive="#33aaff" emissiveIntensity={0.5} toneMapped={false} />
       </mesh>
-      <mesh position={[0.18, 0.88, 0.1]}>
+      <mesh position={[0.18, 0.88, 0.1]} material={MAT.slotGuide}>
         <boxGeometry args={[0.02, 0.015, 0.04]} />
-        <meshStandardMaterial color="#33aaff" emissive="#33aaff" emissiveIntensity={0.5} toneMapped={false} />
       </mesh>
       {/* Keypad (3x3 grid) */}
       {[[-0.08, 0], [0, 0], [0.08, 0], [-0.08, -0.08], [0, -0.08], [0.08, -0.08], [-0.08, -0.16], [0, -0.16], [0.08, -0.16]].map(
         ([ox, oy], i) => (
-          <mesh key={`kp${i}`} position={[ox, 0.98 + oy, 0.1]}>
+          <mesh key={`kp${i}`} position={[ox, 0.98 + oy, 0.1]} material={MAT.keypad}>
             <boxGeometry args={[0.05, 0.05, 0.015]} />
-            <meshStandardMaterial color="#1a2030" roughness={0.4} metalness={0.5} />
           </mesh>
         ),
       )}
       {/* Status LED */}
-      <mesh ref={ledRef} position={[0.17, 1.32, 0.1]}>
+      <mesh position={[0.17, 1.32, 0.1]} material={MAT.ledGreen}>
         <sphereGeometry args={[0.025, 6, 6]} />
-        <meshStandardMaterial color="#00ff44" emissive="#00ff44" emissiveIntensity={1} toneMapped={false} />
       </mesh>
       {/* Cable to floor */}
-      <mesh position={[0, 0.4, -0.08]}>
+      <mesh position={[0, 0.4, -0.08]} material={MAT.rubber}>
         <cylinderGeometry args={[0.02, 0.02, 0.5, 4]} />
-        <meshStandardMaterial {...MAT.rubber} />
       </mesh>
     </group>
   );
-}
+});
 
-function EngineVisual({ pos }: { pos: [number, number, number] }) {
+const EngineVisual = memo(function EngineVisual({ pos }: { pos: [number, number, number] }) {
   const fanRef = useRef<THREE.Mesh>(null);
   const [x, , z] = pos;
 
@@ -394,180 +356,139 @@ function EngineVisual({ pos }: { pos: [number, number, number] }) {
   return (
     <group position={[x, 0, z]}>
       {/* Support frame legs */}
-      <mesh position={[-0.35, 0.25, -0.2]}>
+      <mesh position={[-0.35, 0.25, -0.2]} material={MAT.darkMetal}>
         <boxGeometry args={[0.1, 0.5, 0.1]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      <mesh position={[0.35, 0.25, -0.2]}>
+      <mesh position={[0.35, 0.25, -0.2]} material={MAT.darkMetal}>
         <boxGeometry args={[0.1, 0.5, 0.1]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      <mesh position={[-0.35, 0.25, 0.2]}>
+      <mesh position={[-0.35, 0.25, 0.2]} material={MAT.darkMetal}>
         <boxGeometry args={[0.1, 0.5, 0.1]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      <mesh position={[0.35, 0.25, 0.2]}>
+      <mesh position={[0.35, 0.25, 0.2]} material={MAT.darkMetal}>
         <boxGeometry args={[0.1, 0.5, 0.1]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      {/* Main engine block (horizontal cylinder) */}
-      <mesh position={[0, 0.65, 0]} rotation={[0, 0, Math.PI / 2]}>
+      {/* Main engine block */}
+      <mesh position={[0, 0.65, 0]} rotation={[0, 0, Math.PI / 2]} material={MAT.midMetal}>
         <cylinderGeometry args={[0.3, 0.3, 0.9, 12]} />
-        <meshStandardMaterial {...MAT.midMetal} />
       </mesh>
       {/* End caps */}
-      <mesh position={[-0.48, 0.65, 0]} rotation={[0, 0, Math.PI / 2]}>
+      <mesh position={[-0.48, 0.65, 0]} rotation={[0, 0, Math.PI / 2]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.32, 0.3, 0.06, 12]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
-      <mesh position={[0.48, 0.65, 0]} rotation={[0, 0, Math.PI / 2]}>
+      <mesh position={[0.48, 0.65, 0]} rotation={[0, 0, Math.PI / 2]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.32, 0.3, 0.06, 12]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
       {/* Spinning fan disc */}
-      <mesh ref={fanRef} position={[0.52, 0.65, 0]} rotation={[0, 0, Math.PI / 2]}>
+      <mesh ref={fanRef} position={[0.52, 0.65, 0]} rotation={[0, 0, Math.PI / 2]} material={MAT.fan}>
         <cylinderGeometry args={[0.22, 0.22, 0.015, 3]} />
-        <meshStandardMaterial color="#445566" roughness={0.15} metalness={0.9} />
       </mesh>
       {/* Exhaust pipe */}
-      <mesh position={[0, 1.1, 0]}>
+      <mesh position={[0, 1.1, 0]} material={MAT.darkMetal}>
         <cylinderGeometry args={[0.08, 0.08, 0.5, 8]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      <mesh position={[0, 1.38, 0]}>
+      <mesh position={[0, 1.38, 0]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.1, 0.08, 0.06, 8]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
       {/* Pressure gauge */}
-      <mesh position={[0.15, 0.9, 0.28]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[0.15, 0.9, 0.28]} rotation={[Math.PI / 2, 0, 0]} material={MAT.gaugeFace}>
         <cylinderGeometry args={[0.06, 0.06, 0.02, 12]} />
-        <meshStandardMaterial color="#0a0a0a" roughness={0.1} metalness={0.5} />
       </mesh>
       {/* Gauge needle */}
-      <mesh position={[0.15, 0.9, 0.3]} rotation={[Math.PI / 2, 0, 0.4]}>
+      <mesh position={[0.15, 0.9, 0.3]} rotation={[Math.PI / 2, 0, 0.4]} material={MAT.gaugeNeedle}>
         <boxGeometry args={[0.004, 0.05, 0.005]} />
-        <meshStandardMaterial color="#ff3333" emissive="#ff3333" emissiveIntensity={0.6} toneMapped={false} />
       </mesh>
       {/* Control panel (angled) */}
-      <mesh position={[0, 0.5, 0.45]} rotation={[-0.5, 0, 0]}>
+      <mesh position={[0, 0.5, 0.45]} rotation={[-0.5, 0, 0]} material={MAT.panel}>
         <boxGeometry args={[0.4, 0.25, 0.06]} />
-        <meshStandardMaterial {...MAT.panel} />
       </mesh>
       {/* Panel buttons */}
       {[-0.1, 0, 0.1].map((ox, i) => (
-        <mesh key={`eb${i}`} position={[ox, 0.52, 0.48]} rotation={[-0.5, 0, 0]}>
+        <mesh key={`eb${i}`} position={[ox, 0.52, 0.48]} rotation={[-0.5, 0, 0]} material={BTN_MATS[i]}>
           <cylinderGeometry args={[0.025, 0.025, 0.02, 8]} />
-          <meshStandardMaterial
-            color={['#44ff44', '#ff4444', '#ffaa00'][i]}
-            emissive={['#44ff44', '#ff4444', '#ffaa00'][i]}
-            emissiveIntensity={0.6}
-            toneMapped={false}
-          />
         </mesh>
       ))}
       {/* Cooling pipes */}
-      <mesh position={[-0.2, 0.85, 0.28]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[-0.2, 0.85, 0.28]} rotation={[Math.PI / 2, 0, 0]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.03, 0.03, 0.2, 6]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
-      <mesh position={[-0.35, 0.85, 0.28]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[-0.35, 0.85, 0.28]} rotation={[Math.PI / 2, 0, 0]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.03, 0.03, 0.2, 6]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
     </group>
   );
-}
+});
 
-function GenericTerminalVisual({ pos }: { pos: [number, number, number] }) {
-  const screenRef = useRef<THREE.Mesh>(null);
+const GenericTerminalVisual = memo(function GenericTerminalVisual({ pos }: { pos: [number, number, number] }) {
   const [x, , z] = pos;
 
   useFrame(({ clock }) => {
-    if (screenRef.current) {
-      (screenRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity =
-        0.6 + Math.sin(clock.getElapsedTime() * 0.8) * 0.15;
-    }
+    MAT.monitorScreen.emissiveIntensity = 0.6 + Math.sin(clock.getElapsedTime() * 0.8) * 0.15;
   });
 
   return (
     <group position={[x, 0, z]}>
       {/* Desk */}
-      <mesh position={[0, 0.55, 0]}>
+      <mesh position={[0, 0.55, 0]} material={MAT.midMetal}>
         <boxGeometry args={[0.8, 0.05, 0.45]} />
-        <meshStandardMaterial {...MAT.midMetal} />
       </mesh>
       {/* Desk legs */}
-      <mesh position={[-0.35, 0.27, -0.18]}>
+      <mesh position={[-0.35, 0.27, -0.18]} material={MAT.darkMetal}>
         <boxGeometry args={[0.06, 0.54, 0.06]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      <mesh position={[0.35, 0.27, -0.18]}>
+      <mesh position={[0.35, 0.27, -0.18]} material={MAT.darkMetal}>
         <boxGeometry args={[0.06, 0.54, 0.06]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      <mesh position={[-0.35, 0.27, 0.18]}>
+      <mesh position={[-0.35, 0.27, 0.18]} material={MAT.darkMetal}>
         <boxGeometry args={[0.06, 0.54, 0.06]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
-      <mesh position={[0.35, 0.27, 0.18]}>
+      <mesh position={[0.35, 0.27, 0.18]} material={MAT.darkMetal}>
         <boxGeometry args={[0.06, 0.54, 0.06]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
       {/* Monitor bezel */}
-      <mesh position={[0, 0.95, -0.12]}>
+      <mesh position={[0, 0.95, -0.12]} material={MAT.monitorBezel}>
         <boxGeometry args={[0.55, 0.4, 0.04]} />
-        <meshStandardMaterial color="#0a0a0a" roughness={0.15} metalness={0.8} />
       </mesh>
       {/* Monitor screen */}
-      <mesh ref={screenRef} position={[0, 0.95, -0.1]}>
+      <mesh position={[0, 0.95, -0.1]} material={MAT.monitorScreen}>
         <boxGeometry args={[0.48, 0.32, 0.01]} />
-        <meshStandardMaterial color="#000d1a" emissive="#1155cc" emissiveIntensity={0.7} toneMapped={false} />
       </mesh>
       {/* Monitor stand */}
-      <mesh position={[0, 0.68, -0.12]}>
+      <mesh position={[0, 0.68, -0.12]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.03, 0.03, 0.2, 6]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
-      <mesh position={[0, 0.58, -0.12]}>
+      <mesh position={[0, 0.58, -0.12]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.1, 0.1, 0.02, 8]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
       {/* Keyboard */}
-      <mesh position={[0, 0.59, 0.06]}>
+      <mesh position={[0, 0.59, 0.06]} material={MAT.keyboard}>
         <boxGeometry args={[0.35, 0.02, 0.12]} />
-        <meshStandardMaterial color="#0c0c0c" roughness={0.7} metalness={0.3} />
       </mesh>
       {/* Small device on desk */}
-      <mesh position={[0.28, 0.61, 0.05]}>
+      <mesh position={[0.28, 0.61, 0.05]} material={MAT.panel}>
         <boxGeometry args={[0.1, 0.04, 0.08]} />
-        <meshStandardMaterial {...MAT.panel} />
       </mesh>
       {/* CPU tower under desk */}
-      <mesh position={[0.28, 0.22, -0.1]}>
+      <mesh position={[0.28, 0.22, -0.1]} material={MAT.darkMetal}>
         <boxGeometry args={[0.15, 0.4, 0.3]} />
-        <meshStandardMaterial {...MAT.darkMetal} />
       </mesh>
       {/* CPU power LED */}
-      <mesh position={[0.28, 0.35, 0.06]}>
+      <mesh position={[0.28, 0.35, 0.06]} material={MAT.cpuLed}>
         <sphereGeometry args={[0.015, 6, 6]} />
-        <meshStandardMaterial color="#00ff44" emissive="#00ff44" emissiveIntensity={1.5} toneMapped={false} />
       </mesh>
       {/* Chair */}
-      <mesh position={[0, 0.3, 0.45]}>
+      <mesh position={[0, 0.3, 0.45]} material={MAT.rubber}>
         <boxGeometry args={[0.3, 0.04, 0.3]} />
-        <meshStandardMaterial {...MAT.rubber} />
       </mesh>
-      <mesh position={[0, 0.18, 0.45]}>
+      <mesh position={[0, 0.18, 0.45]} material={MAT.lightMetal}>
         <cylinderGeometry args={[0.04, 0.06, 0.22, 6]} />
-        <meshStandardMaterial {...MAT.lightMetal} />
       </mesh>
-      <mesh position={[0, 0.45, 0.59]}>
+      <mesh position={[0, 0.45, 0.59]} material={MAT.rubber}>
         <boxGeometry args={[0.3, 0.25, 0.03]} />
-        <meshStandardMaterial {...MAT.rubber} />
       </mesh>
     </group>
   );
-}
+});
 
 // ══════════════════════════════════════════════════════════════
 // Dispatcher — maps task type to visual component
@@ -583,11 +504,11 @@ const VISUAL_COMPONENTS: Record<TaskVisualCategory, React.ComponentType<{ pos: [
   terminal: GenericTerminalVisual,
 };
 
-function TaskStationVisual({ task }: { task: TaskStationInfo }) {
+const TaskStationVisual = memo(function TaskStationVisual({ task }: { task: TaskStationInfo }) {
   const meta = TASK_REGISTRY[task.taskType];
   const Component = VISUAL_COMPONENTS[meta?.visualCategory ?? 'terminal'];
   return <Component pos={task.position} />;
-}
+});
 
 // ══════════════════════════════════════════════════════════════
 // Status glow ring on floor per task station
@@ -752,20 +673,19 @@ function TaskFloatingIndicators({ tasks }: { tasks: TaskStationInfo[] }) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// Main export
-// ══════════════════════════════════════════════════════════════
-
-// ══════════════════════════════════════════════════════════════
 // Distance-based culling — only render detailed visuals for nearby tasks
 // ══════════════════════════════════════════════════════════════
 
-const TASK_VISUAL_RANGE_SQ = 40 * 40; // render detailed visuals within 40 units
+const TASK_VISUAL_RANGE_SQ = 40 * 40;
+const CULL_INTERVAL = 10;
 
 function NearbyTaskVisuals({ tasks }: { tasks: TaskStationInfo[] }) {
   const [nearbyIds, setNearbyIds] = useState<Set<string>>(new Set());
   const prevIdsRef = useRef('');
+  const frameRef = useRef(0);
 
   useFrame(() => {
+    if (++frameRef.current % CULL_INTERVAL !== 0) return;
     const [px, , pz] = useGameStore.getState().localPosition;
     const ids: string[] = [];
     for (const task of tasks) {

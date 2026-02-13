@@ -165,6 +165,7 @@ export function TaskInteraction() {
             taskType: best.taskType,
             state,
             isBusy,
+            distanceSq: bestDistSq,
           });
         } else {
           useGameStore.getState().setNearestInteractTask(null);
@@ -188,6 +189,7 @@ export function TaskInteraction() {
             taskType: best.taskType,
             state,
             isBusy,
+            distanceSq: bestDistSq,
           });
         }
       }
@@ -251,7 +253,7 @@ export function TaskInteraction() {
           {/* Status / action */}
           {isCompleted ? (
             <div style={{ fontSize: 12, color: '#4ade80', fontWeight: 600 }}>
-              Conclu&iacute;do &#x2714;
+              Completed &#x2714;
             </div>
           ) : isBusy ? (
             <div style={{ fontSize: 12, color: '#fbbf24', fontWeight: 600 }}>
@@ -274,12 +276,12 @@ export function TaskInteraction() {
                 E
               </span>
               <span style={{ fontSize: 13, color: '#aabbdd', fontWeight: 600 }}>
-                Interagir
+                Interact
               </span>
             </div>
           ) : (
             <div style={{ fontSize: 11, color: '#6b6b8a' }}>
-              N&atilde;o designada
+              Not assigned
             </div>
           )}
         </div>

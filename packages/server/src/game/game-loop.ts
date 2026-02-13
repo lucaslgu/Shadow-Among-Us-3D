@@ -34,12 +34,13 @@ const INFERNO_AMBIENT_DPS = 3; // base ambient heat damage/sec during chaosInfer
 const INFERNO_SUN_DPS = 4;    // additional damage/sec from direct sun exposure
 const ICE_DPS = 4;           // damage/sec from cold exposure (chaosIce)
 const FIRE_CONTACT_DPS = 25; // damage/sec from standing in fire
+const GRAVITY_TIDAL_DPS = 5; // damage/sec from tidal stress during chaosGravity
 const NO_OXYGEN_DPS = 6;    // damage/sec when ship oxygen is depleted
 const STABLE_REGEN_DPS = 10; // heal/sec during stable era
 
 // ===== Ship Oxygen Constants =====
 const MAX_SHIP_OXYGEN = 100;
-const OXYGEN_DEPLETION_RATE = 3;  // %/sec during extreme gravity (runs out in ~33s)
+const OXYGEN_DEPLETION_RATE = 0.5;  // %/sec during extreme gravity (runs out in ~200s / ~3 chaos phases)
 // No automatic regen — oxygen is only restored manually at generators
 const OXYGEN_REFILL_DURATION = 5; // seconds to complete a refill interaction
 const OXYGEN_REFILL_AMOUNT = 100; // refills to full
@@ -84,6 +85,9 @@ export interface GamePlayerState {
   hackerLockedDoors: string[];
   hackerToggledLights: string[];
   hackerToggledWalls: string[];
+  hackerLockedPipes: string[];
+  hackerDisabledGenerators: string[];
+  hackerDrainCount: number; // number of O2 drains used this activation (max 2)
   // Muralha (barrier walls — up to 4 simultaneous)
   muralhaWalls: Array<{ wallId: string; start: [number, number]; end: [number, number]; expiresAt: number }>;
   muralhaNextWallId: number;
@@ -107,6 +111,8 @@ export interface GamePlayerState {
   // Underground pipe system
   isUnderground: boolean;
   currentPipeNodeId: string | null;
+  undergroundEnteredAt: number; // Date.now() when entered, 0 when on surface
+  pipeCooldownEnd: number; // Date.now() + 20s after exiting pipe
   // Meeting
   emergencyButtonCooldownEnd: number;
   emergencyButtonUsesLeft: number;
@@ -142,9 +148,10 @@ function computeEraFromScenario(
 
 function getEraPeriod(era: string): number {
   switch (era) {
-    case 'chaosInferno': return 8000;
-    case 'chaosIce': return Infinity; // frozen
-    default: return 45000; // stable
+    case 'chaosInferno': return 30000;  // 30s cycle
+    case 'chaosIce': return Infinity;   // frozen
+    case 'chaosGravity': return 20000;  // 20s cycle (fast — gravitational anomalies)
+    default: return 120000;             // 2min cycle
   }
 }
 
@@ -229,12 +236,17 @@ export function startGameLoop(
   deadBodies: Map<string, DeadBody>,
   onEraChange?: (era: string) => void,
   onCheckEndConditions?: () => void,
+  options?: { devMode?: boolean },
 ): ReturnType<typeof setInterval> {
   let tickSeq = 0;
   const gameStartTime = Date.now();
-  const sunSim = createSunSimulation();
-  let shipOxygen = MAX_SHIP_OXYGEN;
-
+  const masses: [number, number, number] = [
+    cosmicScenario.suns[0].mass ?? 1.0,
+    cosmicScenario.suns[1].mass ?? 1.0,
+    cosmicScenario.suns[2].mass ?? 1.0,
+  ];
+  const sunSim = createSunSimulation(masses, cosmicScenario.initialConfig as 'triangle' | 'hierarchical' | 'figure8' | undefined);
+  // shipOxygen is stored on mazeSnapshot so hacker:action handlers can drain it
   const interval = setInterval(() => {
     tickSeq++;
     const now = Date.now();
@@ -267,6 +279,16 @@ export function startGameLoop(
           !gp.powerActive && now >= gp.powerCooldownEnd) {
         gp.powerUsesLeft = POWER_CONFIGS[PowerType.MURALHA].usesPerMatch;
       }
+      // Recharge TELEPORT charges one at a time when cooldown expires
+      if (gp.power === PowerType.TELEPORT &&
+          gp.powerUsesLeft < POWER_CONFIGS[PowerType.TELEPORT].usesPerMatch &&
+          !gp.powerActive && now >= gp.powerCooldownEnd) {
+        gp.powerUsesLeft++;
+        if (gp.powerUsesLeft < POWER_CONFIGS[PowerType.TELEPORT].usesPerMatch) {
+          // Still more charges to recharge — start cooldown for the next one
+          gp.powerCooldownEnd = now + POWER_CONFIGS[PowerType.TELEPORT].cooldown;
+        }
+      }
     }
 
     // ── Collect active muralha walls ──
@@ -275,6 +297,25 @@ export function startGameLoop(
       for (const wall of gp.muralhaWalls) {
         muralhaWalls.push({ wallId: wall.wallId, ownerId: gp.socketId, start: wall.start, end: wall.end });
       }
+    }
+
+    // ── Expire hacker locks (doors, pipes, generators) ──
+    for (const doorState of Object.values(mazeSnapshot.doorStates)) {
+      if (doorState.hackerLockExpiresAt > 0 && now >= doorState.hackerLockExpiresAt) {
+        doorState.isLocked = false;
+        doorState.lockedBy = null;
+        doorState.hackerLockExpiresAt = 0;
+      }
+    }
+    for (const pipeLock of Object.values(mazeSnapshot.pipeLockStates)) {
+      if (pipeLock.hackerLockExpiresAt > 0 && now >= pipeLock.hackerLockExpiresAt) {
+        pipeLock.isLocked = false;
+        pipeLock.lockedBy = null;
+        pipeLock.hackerLockExpiresAt = 0;
+      }
+    }
+    for (const [genId, expiresAt] of Object.entries(mazeSnapshot.disabledGenerators)) {
+      if (now >= expiresAt) delete mazeSnapshot.disabledGenerators[genId];
     }
 
     // ── Build collision context ──
@@ -315,6 +356,11 @@ export function startGameLoop(
       }
     }
 
+    // Gravity-based speed factor: high gravity → slower movement
+    const gravitySpeedFactor = (currentEra === 'chaosGravity' && (eraGravity ?? 1) > 1)
+      ? Math.max(0.4, 1.0 / Math.sqrt(eraGravity ?? 1))
+      : 1.0;
+
     // Process all queued inputs for each alive player
     for (const [, gp] of gamePlayers) {
       if (!gp.isAlive && !gp.isGhost) continue;
@@ -326,6 +372,10 @@ export function startGameLoop(
         }
         continue;
       }
+      // Apply gravity slowdown to speed multiplier
+      const savedSpeed = gp.speedMultiplier;
+      gp.speedMultiplier *= gravitySpeedFactor;
+
       const skipCollision = gp.isImpermeable;
       // Underground players use pipe tunnel collision, surface players use maze collision
       const ctx = gp.isUnderground ? undergroundCollisionCtx : collisionCtx;
@@ -333,6 +383,8 @@ export function startGameLoop(
         const input = gp.inputQueue.shift()!;
         processInput(gp, input, TICK_INTERVAL / 1000, skipCollision ? undefined : ctx);
       }
+      // Restore original speed multiplier (gravity factor is per-tick, not persistent)
+      gp.speedMultiplier = savedSpeed;
       // Update currentPipeNodeId based on proximity to pipe nodes
       if (gp.isUnderground && mazeLayout.pipeNodes) {
         gp.currentPipeNodeId = null;
@@ -343,6 +395,25 @@ export function startGameLoop(
             gp.currentPipeNodeId = pn.id;
             break;
           }
+        }
+
+        // Force-exit if underground oxygen time expired (40 seconds)
+        if (gp.undergroundEnteredAt > 0 && now - gp.undergroundEnteredAt >= 40_000) {
+          // Find nearest pipe node to teleport back to surface
+          let nearestNode = mazeLayout.pipeNodes[0];
+          let nearestDistSq = Infinity;
+          for (const pn of mazeLayout.pipeNodes) {
+            const dx2 = gp.position[0] - pn.undergroundPosition[0];
+            const dz2 = gp.position[2] - pn.undergroundPosition[2];
+            const d = dx2 * dx2 + dz2 * dz2;
+            if (d < nearestDistSq) { nearestDistSq = d; nearestNode = pn; }
+          }
+          gp.position = [...nearestNode.surfacePosition];
+          gp.isUnderground = false;
+          gp.currentPipeNodeId = null;
+          gp.undergroundEnteredAt = 0;
+          gp.pipeCooldownEnd = now + 20_000;
+          console.log(`[PIPE] ${gp.name} forced out — underground oxygen expired`);
         }
       }
     }
@@ -407,7 +478,7 @@ export function startGameLoop(
     // ── Ship oxygen depletion (no auto-regen — manual refill only) ──
     const isExtremeGravity = eraGravity >= 2.0 || eraGravity <= 0.25;
     if (isExtremeGravity) {
-      shipOxygen = Math.max(0, shipOxygen - OXYGEN_DEPLETION_RATE * dt);
+      mazeSnapshot.shipOxygen = Math.max(0, mazeSnapshot.shipOxygen - OXYGEN_DEPLETION_RATE * dt);
     }
 
     // ── Process oxygen refill interactions ──
@@ -429,6 +500,14 @@ export function startGameLoop(
         continue;
       }
 
+      // Generator disabled by hacker — cancel refill
+      const disabledUntil = mazeSnapshot.disabledGenerators[rgp.oxygenRefillGeneratorId!];
+      if (disabledUntil && now < disabledUntil) {
+        rgp.oxygenRefillGeneratorId = null;
+        rgp.oxygenRefillStartTime = 0;
+        continue;
+      }
+
       const gdx = rgp.position[0] - gen.position[0];
       const gdz = rgp.position[2] - gen.position[2];
       if (gdx * gdx + gdz * gdz > OXYGEN_REFILL_RANGE_SQ) {
@@ -440,7 +519,7 @@ export function startGameLoop(
 
       // Check if refill duration elapsed
       if (now - rgp.oxygenRefillStartTime >= OXYGEN_REFILL_DURATION * 1000) {
-        shipOxygen = Math.min(MAX_SHIP_OXYGEN, shipOxygen + OXYGEN_REFILL_AMOUNT);
+        mazeSnapshot.shipOxygen = Math.min(MAX_SHIP_OXYGEN, mazeSnapshot.shipOxygen + OXYGEN_REFILL_AMOUNT);
         rgp.oxygenRefillGeneratorId = null;
         rgp.oxygenRefillStartTime = 0;
       }
@@ -464,36 +543,52 @@ export function startGameLoop(
         continue;
       }
 
-      // Shelter check (player inside a room's circular zone)
+      // Shelter check: player is inside ANY room with ALL its doors closed
       let inShelter = false;
-      for (const shelter of mazeLayout.shelterZones) {
-        const sdx = gp.position[0] - shelter.position[0];
-        const sdz = gp.position[2] - shelter.position[2];
-        if (sdx * sdx + sdz * sdz < shelter.radius * shelter.radius) {
+      const halfMap = (mazeLayout.gridSize * mazeLayout.cellSize) / 2;
+      const playerCol = Math.floor((gp.position[0] + halfMap) / mazeLayout.cellSize);
+      const playerRow = Math.floor((gp.position[2] + halfMap) / mazeLayout.cellSize);
+
+      // Check if player's cell is a room
+      const playerRoom = mazeLayout.rooms.find((r) => r.row === playerRow && r.col === playerCol);
+      if (playerRoom) {
+        // Find all doors connected to this room cell and check if they are ALL closed
+        let allDoorsClosed = true;
+        let hasDoors = false;
+        for (const door of mazeLayout.doors) {
+          const sideOffsets: Record<string, [number, number]> = { N: [-1, 0], S: [1, 0], E: [0, 1], W: [0, -1] };
+          const [dr, dc] = sideOffsets[door.side] ?? [0, 0];
+          const isConnected =
+            (door.row === playerRow && door.col === playerCol) ||
+            (door.row + dr === playerRow && door.col + dc === playerCol);
+          if (isConnected) {
+            hasDoors = true;
+            const doorState = mazeSnapshot.doorStates[door.id];
+            if (!doorState || doorState.isOpen) {
+              allDoorsClosed = false;
+              break;
+            }
+          }
+        }
+        if (hasDoors && allDoorsClosed) {
           inShelter = true;
-          break;
         }
       }
 
-      // Door protection: all doors within 8 units are closed?
-      let doorProtection = false;
+      // Also check designated shelter zones (always protect regardless of doors)
       if (!inShelter) {
-        const nearbyDoors: typeof mazeLayout.doors = [];
-        for (const d of mazeLayout.doors) {
-          const ddx = gp.position[0] - d.position[0];
-          const ddz = gp.position[2] - d.position[2];
-          if (ddx * ddx + ddz * ddz < 64) nearbyDoors.push(d);
-        }
-        if (nearbyDoors.length > 0 && nearbyDoors.every(d => {
-          const state = mazeSnapshot.doorStates[d.id];
-          return state && !state.isOpen;
-        })) {
-          doorProtection = true;
+        for (const shelter of mazeLayout.shelterZones) {
+          const sdx = gp.position[0] - shelter.position[0];
+          const sdz = gp.position[2] - shelter.position[2];
+          if (sdx * sdx + sdz * sdz < shelter.radius * shelter.radius) {
+            inShelter = true;
+            break;
+          }
         }
       }
 
       gp.inShelter = inShelter;
-      gp.doorProtection = doorProtection;
+      gp.doorProtection = false;
 
       // ── Directional sun exposure check ──
       // For each visible sun, determine if the player is exposed to it.
@@ -568,18 +663,20 @@ export function startGameLoop(
           sources.push('cold');
           damage += ICE_DPS * dt;
         }
+      } else if (currentEra === 'chaosGravity') {
+        // Tidal stress damage — gravitational anomalies tear at the ship
+        // Shelter fully protects; door protection reduces by 30% (less effective than thermal)
+        if (!inShelter) {
+          sources.push('gravity');
+          damage += GRAVITY_TIDAL_DPS * dt;
+        }
       }
 
       // Oxygen depletion damage — when ship oxygen is empty, everyone suffocates
       // (shelter does NOT protect — the whole ship has no O2)
-      if (shipOxygen <= 0) {
+      if (mazeSnapshot.shipOxygen <= 0) {
         sources.push('oxygen');
         damage += NO_OXYGEN_DPS * dt;
-      }
-
-      // Apply door protection (50% reduction) for non-shelter players
-      if (!inShelter && doorProtection) {
-        damage *= 0.5;
       }
 
       gp.damageSource = (damage > 0 && sources.length > 0) ? sources.join('+') : 'none';
@@ -592,20 +689,23 @@ export function startGameLoop(
 
       // Death by environmental damage → become ghost
       if (gp.health <= 0) {
-        gp.health = 0;
-        gp.isAlive = false;
-        gp.isGhost = true;
-        const deathCause = sources.join('+') || 'environment';
-        // Create dead body
-        const body = createDeadBody(gp);
-        deadBodies.set(body.bodyId, body);
-        io.to(gp.socketId).emit('ghost:death-screen', { cause: deathCause, killerId: null });
-        io.to(roomCode).emit('kill:occurred', {
-          killerId: gp.socketId,
-          victimId: gp.socketId,
-          bodyId: body.bodyId,
-          bodyPosition: { x: gp.position[0], y: gp.position[1], z: gp.position[2] },
-        });
+        if (options?.devMode) {
+          gp.health = 1;
+        } else {
+          gp.health = 0;
+          gp.isAlive = false;
+          gp.isGhost = true;
+          const deathCause = sources.join('+') || 'environment';
+          const body = createDeadBody(gp);
+          deadBodies.set(body.bodyId, body);
+          io.to(gp.socketId).emit('ghost:death-screen', { cause: deathCause, killerId: null });
+          io.to(roomCode).emit('kill:occurred', {
+            killerId: gp.socketId,
+            victimId: gp.socketId,
+            bodyId: body.bodyId,
+            bodyPosition: { x: gp.position[0], y: gp.position[1], z: gp.position[2] },
+          });
+        }
       }
     }
 
@@ -623,6 +723,7 @@ export function startGameLoop(
         speedMultiplier: gp.speedMultiplier,
         lastProcessedInput: gp.lastProcessedInput,
         powerActive: gp.powerActive,
+        powerActiveEnd: gp.powerActiveEnd,
         powerCooldownEnd: gp.powerCooldownEnd,
         mindControlTargetId: gp.mindControlTargetToken
           ? (findSocketIdByToken(gamePlayers, gp.mindControlTargetToken) ?? null)
@@ -639,8 +740,13 @@ export function startGameLoop(
           ? (findSocketIdByToken(gamePlayers, gp.ghostPossessTargetToken) ?? null)
           : null,
         powerUsesLeft: gp.powerUsesLeft,
+        metamorphEndTime: gp.isMetamorphed ? gp.metamorphEndTime : 0,
         isUnderground: gp.isUnderground,
         currentPipeNodeId: gp.currentPipeNodeId,
+        undergroundTimeLeft: gp.isUnderground && gp.undergroundEnteredAt > 0
+          ? Math.max(0, 40 - (now - gp.undergroundEnteredAt) / 1000)
+          : 0,
+        pipeCooldownEnd: gp.pipeCooldownEnd,
       };
     }
 
@@ -654,11 +760,14 @@ export function startGameLoop(
         dynamicWallStates: mazeSnapshot.dynamicWallStates,
         muralhaWalls,
         taskStates: mazeSnapshot.taskStates,
+        pipeLockStates: mazeSnapshot.pipeLockStates,
+        disabledGenerators: mazeSnapshot.disabledGenerators,
+        shipOxygen: mazeSnapshot.shipOxygen,
       },
       currentEra,
       eraGravity,
       eraDescription,
-      shipOxygen: Math.round(shipOxygen),
+      shipOxygen: Math.round(mazeSnapshot.shipOxygen),
       oxygenRefillPlayerId: (() => {
         for (const [, rgp] of gamePlayers) {
           if (rgp.oxygenRefillGeneratorId) return rgp.socketId;
@@ -701,6 +810,7 @@ export function activatePower(
   wallPosition?: [number, number],
   currentEra?: string,
   teleportPosition?: [number, number],
+  teleportFromMap?: boolean,
 ): boolean {
   const now = Date.now();
   const powerType = gp.power as PowerType;
@@ -878,13 +988,21 @@ export function activatePower(
           gp.position[2] - Math.cos(yaw) * 8,
         ];
       }
-      gp.powerUsesLeft--;
+
+      if (teleportFromMap) {
+        // Map teleport: consume ALL charges, recharge one by one via cooldown
+        gp.powerUsesLeft = 0;
+      } else {
+        // Quick-press teleport: consume 1 charge
+        gp.powerUsesLeft--;
+      }
+
       gp.powerActive = false; // instant
       if (gp.powerUsesLeft > 0) {
         // Short cooldown between charges (1s)
         gp.powerCooldownEnd = now + 1000;
       } else {
-        // Full cooldown after all charges used
+        // Full cooldown to recharge first charge
         gp.powerCooldownEnd = now + config.cooldown;
       }
       break;
@@ -907,10 +1025,14 @@ export function activatePower(
     }
 
     case PowerType.HACKER:
-      // Just mark as active — hacking done via 'hacker:action' events
+      // Hacker becomes invisible while power is active
+      gp.isInvisible = true;
       gp.hackerLockedDoors = [];
       gp.hackerToggledLights = [];
       gp.hackerToggledWalls = [];
+      gp.hackerLockedPipes = [];
+      gp.hackerDisabledGenerators = [];
+      gp.hackerDrainCount = 0;
       break;
 
     default:
@@ -981,26 +1103,24 @@ export function deactivatePower(
       break;
 
     case PowerType.HACKER:
-      // Revert all hacker actions
+      gp.isInvisible = false;
       if (mazeSnapshot) {
-        for (const doorId of gp.hackerLockedDoors) {
-          const doorState = mazeSnapshot.doorStates[doorId];
-          if (doorState && doorState.lockedBy === gp.socketId) {
-            doorState.isLocked = false;
-            doorState.lockedBy = null;
-          }
-        }
+        // Do NOT revert hacker-locked doors/pipes — they have 40s auto-expire timers
+        // Revert toggled lights (current behavior)
         for (const lightId of gp.hackerToggledLights) {
           mazeSnapshot.lightStates[lightId] = true;
         }
+        // Revert toggled walls (current behavior)
         for (const wallId of gp.hackerToggledWalls) {
-          // Revert to closed (default state)
           mazeSnapshot.dynamicWallStates[wallId] = true;
         }
+        // Do NOT revert disabled generators — they auto-expire
       }
       gp.hackerLockedDoors = [];
       gp.hackerToggledLights = [];
       gp.hackerToggledWalls = [];
+      gp.hackerLockedPipes = [];
+      gp.hackerDisabledGenerators = [];
       break;
 
     default:
@@ -1060,6 +1180,7 @@ export function attemptKill(
   targetId: string,
   killCooldown: number,
   deadBodies: Map<string, DeadBody>,
+  devMode?: boolean,
 ): { success: boolean; bodyId?: string } {
   // Only shadows can kill
   if (attacker.role !== 'shadow') return { success: false };
@@ -1075,6 +1196,12 @@ export function attemptKill(
     if (gp.socketId === targetId) { target = gp; break; }
   }
   if (!target || !target.isAlive || target.isGhost) return { success: false };
+
+  // In dev mode, targets are immune to kills
+  if (devMode) {
+    attacker.killCooldownEnd = now + killCooldown;
+    return { success: false };
+  }
 
   // Target is immune if impermeable
   if (target.isImpermeable) return { success: false };
@@ -1137,6 +1264,71 @@ export function interactDoor(
 
   // Toggle door
   doorState.isOpen = !doorState.isOpen;
+  return true;
+}
+
+// ===== Door Lock (player presses R near a door to lock/unlock) =====
+
+export function lockDoor(
+  gp: GamePlayerState,
+  doorId: string,
+  mazeLayout: MazeLayout,
+  mazeSnapshot: MazeSnapshot,
+): boolean {
+  const door = mazeLayout.doors.find((d) => d.id === doorId);
+  if (!door) return false;
+
+  const doorState = mazeSnapshot.doorStates[doorId];
+  if (!doorState) return false;
+
+  // Check proximity
+  const dx = gp.position[0] - door.position[0];
+  const dz = gp.position[2] - door.position[2];
+  const distSq = dx * dx + dz * dz;
+  if (distSq > DOOR_INTERACT_RANGE * DOOR_INTERACT_RANGE) return false;
+
+  if (doorState.isLocked) {
+    // Hacker locks are unbreakable until they auto-expire
+    if (doorState.hackerLockExpiresAt > 0 && Date.now() < doorState.hackerLockExpiresAt) return false;
+    // 15-second cooldown before normal locks can be unlocked
+    if (doorState.lockedAt > 0 && Date.now() - doorState.lockedAt < 15_000) return false;
+    // Normal unlock — allowed from either side
+    doorState.isLocked = false;
+    doorState.lockedBy = null;
+    doorState.hackerLockExpiresAt = 0;
+    doorState.lockedAt = 0;
+  } else {
+    // Lock — only allowed from INSIDE a room
+    // Determine which cell the player is in
+    const halfMap = (mazeLayout.gridSize * mazeLayout.cellSize) / 2;
+    const playerCol = Math.floor((gp.position[0] + halfMap) / mazeLayout.cellSize);
+    const playerRow = Math.floor((gp.position[2] + halfMap) / mazeLayout.cellSize);
+
+    // The door connects cell (door.row, door.col) to an adjacent cell
+    const sideOffsets: Record<string, [number, number]> = { N: [-1, 0], S: [1, 0], E: [0, 1], W: [0, -1] };
+    const [dr, dc] = sideOffsets[door.side] ?? [0, 0];
+    const cellARow = door.row;
+    const cellACol = door.col;
+    const cellBRow = door.row + dr;
+    const cellBCol = door.col + dc;
+
+    // Check which side the player is on
+    let playerIsInRoom = false;
+    if (playerRow === cellARow && playerCol === cellACol) {
+      playerIsInRoom = mazeLayout.rooms.some((r) => r.row === cellARow && r.col === cellACol);
+    } else if (playerRow === cellBRow && playerCol === cellBCol) {
+      playerIsInRoom = mazeLayout.rooms.some((r) => r.row === cellBRow && r.col === cellBCol);
+    }
+
+    if (!playerIsInRoom) return false;
+
+    doorState.isOpen = false;
+    doorState.isLocked = true;
+    doorState.lockedBy = gp.socketId;
+    doorState.hackerLockExpiresAt = 0; // normal player lock — no auto-expire
+    doorState.lockedAt = Date.now();
+  }
+
   return true;
 }
 

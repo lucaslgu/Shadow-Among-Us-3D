@@ -16,8 +16,11 @@ interface RemotePlayerProps {
   color: string; // initial color — overridden by snapshot in useFrame
 }
 
+const SPOTLIGHT_RANGE_SQ = 30 * 30;
+
 export function RemotePlayer({ playerId, color }: RemotePlayerProps) {
   const groupRef = useRef<THREE.Group>(null!);
+  const spotRef = useRef<THREE.SpotLight>(null!);
   const prevPos = useRef<[number, number, number]>([0, 0, 0]);
   const smoothSpeed = useRef(0);
 
@@ -78,6 +81,14 @@ export function RemotePlayer({ playerId, color }: RemotePlayerProps) {
         animData.color = snap?.color ?? color;
       }
     }
+
+    // Distance-based spotlight culling
+    if (spotRef.current) {
+      const [lpx, , lpz] = useGameStore.getState().localPosition;
+      const dx = groupRef.current.position.x - lpx;
+      const dz = groupRef.current.position.z - lpz;
+      spotRef.current.visible = (dx * dx + dz * dz) < SPOTLIGHT_RANGE_SQ;
+    }
   });
 
   return (
@@ -86,6 +97,7 @@ export function RemotePlayer({ playerId, color }: RemotePlayerProps) {
 
       {/* Flashlight (no shadows for performance) */}
       <spotLight
+        ref={spotRef}
         position={[0, 1, -0.3]}
         angle={Math.PI / 4}
         penumbra={0.5}

@@ -7,150 +7,144 @@ import { useNetworkStore } from '../stores/network-store.js';
 import type { PipeNode, PipeConnection } from '@shadow/shared';
 
 /**
- * PipeSystem — renders realistic underground pipe tunnels that players
- * walk through, with industrial metal aesthetics, ribbed interiors,
- * and atmospheric lighting. Surface manholes mark entry/exit points.
+ * PipeSystem — renders underground industrial tunnels with concrete walls,
+ * ceiling pipes, and atmospheric lighting. Players walk through wide
+ * rectangular corridors connecting rooms via manholes on the surface.
  */
 
 const PIPE_INTERACT_RANGE = 3.5;
 const PIPE_INTERACT_RANGE_SQ = PIPE_INTERACT_RANGE * PIPE_INTERACT_RANGE;
-const TUNNEL_RADIUS = 1.8;
-const CHAMBER_RADIUS = 2.5;
+const TUNNEL_RADIUS = 3.0;     // half-width of corridor (collision match)
+const TUNNEL_HEIGHT = 5.0;     // floor to ceiling
+const CHAMBER_RADIUS = 3.5;    // half-size of junction room (collision match)
 const UNDERGROUND_Y = -10;
 const PIPE_GLOW = '#00ff88';
 const PIPE_GLOW_DIM = '#005533';
 
-// Rib spacing along tunnels (units between ribs)
-const RIB_SPACING = 2.5;
-const RIB_INNER_RADIUS = TUNNEL_RADIUS - 0.02;
-const RIB_OUTER_RADIUS = TUNNEL_RADIUS + 0.08;
+// Beam spacing along tunnels
+const BEAM_SPACING = 3.0;
 
 // Module-level reusable objects
 const _mat4 = new THREE.Matrix4();
 const _quat = new THREE.Quaternion();
 const _euler = new THREE.Euler();
+const _pos = new THREE.Vector3();
+const _one = new THREE.Vector3(1, 1, 1);
 
 // ── Manhole covers on the surface ──
 
 function PipeEntries({ nodes }: { nodes: PipeNode[] }) {
-  const meshRef = useRef<THREE.InstancedMesh>(null);
-  const ringRef = useRef<THREE.InstancedMesh>(null);
-  const grateRef = useRef<THREE.InstancedMesh>(null);
+  const coverRef = useRef<THREE.InstancedMesh>(null);
+  const rimRef = useRef<THREE.InstancedMesh>(null);
+  const indicatorRef = useRef<THREE.InstancedMesh>(null);
 
   useEffect(() => {
-    const mesh = meshRef.current;
-    const ring = ringRef.current;
-    const grate = grateRef.current;
-    if (!mesh || !ring || !grate) return;
+    const cover = coverRef.current;
+    const rim = rimRef.current;
+    const indicator = indicatorRef.current;
+    if (!cover || !rim || !indicator) return;
 
     for (let i = 0; i < nodes.length; i++) {
       const [x, , z] = nodes[i].surfacePosition;
 
-      // Base circle
-      _mat4.makeTranslation(x, 0.02, z);
-      mesh.setMatrixAt(i, _mat4);
-
-      // Glowing ring
-      _mat4.makeTranslation(x, 0.04, z);
-      ring.setMatrixAt(i, _mat4);
-
-      // Grate pattern (rotated flat)
       _euler.set(-Math.PI / 2, 0, 0);
       _quat.setFromEuler(_euler);
-      _mat4.compose(new THREE.Vector3(x, 0.03, z), _quat, new THREE.Vector3(1, 1, 1));
-      grate.setMatrixAt(i, _mat4);
+      _pos.set(x, 0.03, z);
+      _mat4.compose(_pos, _quat, _one);
+      cover.setMatrixAt(i, _mat4);
+
+      _pos.set(x, 0.05, z);
+      _mat4.compose(_pos, _quat, _one);
+      rim.setMatrixAt(i, _mat4);
+
+      _pos.set(x, 0.06, z);
+      _mat4.compose(_pos, _quat, _one);
+      indicator.setMatrixAt(i, _mat4);
     }
-    mesh.instanceMatrix.needsUpdate = true;
-    ring.instanceMatrix.needsUpdate = true;
-    grate.instanceMatrix.needsUpdate = true;
+    cover.instanceMatrix.needsUpdate = true;
+    rim.instanceMatrix.needsUpdate = true;
+    indicator.instanceMatrix.needsUpdate = true;
   }, [nodes]);
 
   return (
     <>
-      {/* Manhole cover base (dark metallic circle) */}
-      <instancedMesh ref={meshRef} args={[undefined, undefined, nodes.length]} frustumCulled={false}>
-        <circleGeometry args={[1.3, 24]} />
-        <meshStandardMaterial color="#080808" roughness={0.2} metalness={0.9} />
+      <instancedMesh ref={coverRef} args={[undefined, undefined, nodes.length]} frustumCulled={false}>
+        <circleGeometry args={[1.2, 24]} />
+        <meshStandardMaterial color="#252520" roughness={0.35} metalness={0.85} />
       </instancedMesh>
-
-      {/* Glowing ring */}
-      <instancedMesh ref={ringRef} args={[undefined, undefined, nodes.length]} frustumCulled={false}>
-        <ringGeometry args={[1.05, 1.3, 24]} />
-        <meshStandardMaterial color="#1a1a1a" roughness={0.3} metalness={0.8} />
+      <instancedMesh ref={rimRef} args={[undefined, undefined, nodes.length]} frustumCulled={false}>
+        <ringGeometry args={[1.15, 1.35, 24]} />
+        <meshStandardMaterial color="#3a3a30" roughness={0.25} metalness={0.9} />
       </instancedMesh>
-
-      {/* Inner grate pattern */}
-      <instancedMesh ref={grateRef} args={[undefined, undefined, nodes.length]} frustumCulled={false}>
-        <ringGeometry args={[0.4, 1.0, 8]} />
-        <meshBasicMaterial color={PIPE_GLOW} transparent opacity={0.3} />
+      <instancedMesh ref={indicatorRef} args={[undefined, undefined, nodes.length]} frustumCulled={false}>
+        <ringGeometry args={[0.15, 0.25, 12]} />
+        <meshBasicMaterial color={PIPE_GLOW} transparent opacity={0.5} />
       </instancedMesh>
     </>
   );
 }
 
-// ── Pipe tunnel segment (connects two nodes) ──
+// ── Rectangular tunnel segment (connects two nodes) ──
 
 function PipeTunnelSegment({ from, to }: { from: [number, number, number]; to: [number, number, number] }) {
-  const { position, quaternion, length } = useMemo(() => {
+  const { midX, midZ, angle, length } = useMemo(() => {
     const dx = to[0] - from[0];
     const dz = to[2] - from[2];
-    const len = Math.sqrt(dx * dx + dz * dz);
-    const angle = Math.atan2(dx, dz);
-
-    const q = new THREE.Quaternion();
-    const e = new THREE.Euler(Math.PI / 2, 0, -angle);
-    q.setFromEuler(e);
-
     return {
-      position: new THREE.Vector3((from[0] + to[0]) / 2, from[1], (from[2] + to[2]) / 2),
-      quaternion: q,
-      length: len,
+      midX: (from[0] + to[0]) / 2,
+      midZ: (from[2] + to[2]) / 2,
+      angle: Math.atan2(dx, dz),
+      length: Math.sqrt(dx * dx + dz * dz),
     };
   }, [from, to]);
 
   return (
-    <group position={position} quaternion={quaternion}>
-      {/* Main pipe tube (player walks inside) */}
-      <mesh>
-        <cylinderGeometry args={[TUNNEL_RADIUS, TUNNEL_RADIUS, length, 16, 1, true]} />
-        <meshStandardMaterial
-          color="#2a2a28"
-          roughness={0.35}
-          metalness={0.75}
-          side={THREE.BackSide}
-        />
+    <group position={[midX, UNDERGROUND_Y, midZ]} rotation={[0, angle, 0]}>
+      {/* Left concrete wall */}
+      <mesh position={[-TUNNEL_RADIUS, TUNNEL_HEIGHT / 2, 0]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[length, TUNNEL_HEIGHT]} />
+        <meshStandardMaterial color="#3a3a35" roughness={0.85} metalness={0.1} side={THREE.DoubleSide} />
       </mesh>
-
-      {/* Outer pipe shell (visible from outside) */}
-      <mesh>
-        <cylinderGeometry args={[TUNNEL_RADIUS + 0.1, TUNNEL_RADIUS + 0.1, length, 12, 1, true]} />
-        <meshStandardMaterial
-          color="#1a1a18"
-          roughness={0.4}
-          metalness={0.8}
-        />
+      {/* Right concrete wall */}
+      <mesh position={[TUNNEL_RADIUS, TUNNEL_HEIGHT / 2, 0]} rotation={[0, -Math.PI / 2, 0]}>
+        <planeGeometry args={[length, TUNNEL_HEIGHT]} />
+        <meshStandardMaterial color="#3a3a35" roughness={0.85} metalness={0.1} side={THREE.DoubleSide} />
       </mesh>
-
-      {/* Floor grate (flat walkable surface inside the pipe) */}
-      <mesh position={[0, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
-        <planeGeometry args={[length, TUNNEL_RADIUS * 1.4]} />
-        <meshStandardMaterial
-          color="#1a1c1a"
-          roughness={0.6}
-          metalness={0.5}
-          side={THREE.DoubleSide}
-        />
+      {/* Ceiling */}
+      <mesh position={[0, TUNNEL_HEIGHT, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[TUNNEL_RADIUS * 2, length]} />
+        <meshStandardMaterial color="#2a2a28" roughness={0.9} metalness={0.05} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Left ceiling pipe (decorative) */}
+      <mesh position={[-TUNNEL_RADIUS + 0.5, TUNNEL_HEIGHT - 0.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.12, 0.12, length, 8]} />
+        <meshStandardMaterial color="#555550" roughness={0.3} metalness={0.8} />
+      </mesh>
+      {/* Right ceiling pipe (decorative) */}
+      <mesh position={[TUNNEL_RADIUS - 0.5, TUNNEL_HEIGHT - 0.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.12, 0.12, length, 8]} />
+        <meshStandardMaterial color="#555550" roughness={0.3} metalness={0.8} />
+      </mesh>
+      {/* Floor gutter (left edge) */}
+      <mesh position={[-TUNNEL_RADIUS + 0.15, 0.02, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.3, length]} />
+        <meshStandardMaterial color="#1a1a18" roughness={0.4} metalness={0.3} side={THREE.DoubleSide} />
+      </mesh>
+      {/* Floor gutter (right edge) */}
+      <mesh position={[TUNNEL_RADIUS - 0.15, 0.02, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.3, length]} />
+        <meshStandardMaterial color="#1a1a18" roughness={0.4} metalness={0.3} side={THREE.DoubleSide} />
       </mesh>
     </group>
   );
 }
 
-// ── Reinforcement ribs (instanced across all tunnel segments) ──
+// ── Ceiling support beams (instanced across all tunnels) ──
 
-function TunnelRibs({ nodes, connections }: { nodes: PipeNode[]; connections: PipeConnection[] }) {
-  const ribRef = useRef<THREE.InstancedMesh>(null);
+function TunnelBeams({ nodes, connections }: { nodes: PipeNode[]; connections: PipeConnection[] }) {
+  const beamRef = useRef<THREE.InstancedMesh>(null);
 
-  const ribCount = useMemo(() => {
+  const beamCount = useMemo(() => {
     const nodeMap = new Map<string, PipeNode>();
     for (const n of nodes) nodeMap.set(n.id, n);
 
@@ -162,13 +156,13 @@ function TunnelRibs({ nodes, connections }: { nodes: PipeNode[]; connections: Pi
       const dx = b.undergroundPosition[0] - a.undergroundPosition[0];
       const dz = b.undergroundPosition[2] - a.undergroundPosition[2];
       const len = Math.sqrt(dx * dx + dz * dz);
-      count += Math.max(1, Math.floor(len / RIB_SPACING));
+      count += Math.max(1, Math.floor(len / BEAM_SPACING));
     }
     return count;
   }, [nodes, connections]);
 
   useEffect(() => {
-    const mesh = ribRef.current;
+    const mesh = beamRef.current;
     if (!mesh) return;
 
     const nodeMap = new Map<string, PipeNode>();
@@ -186,44 +180,40 @@ function TunnelRibs({ nodes, connections }: { nodes: PipeNode[]; connections: Pi
       const len = Math.sqrt(dx * dx + dz * dz);
       const dirX = dx / len, dirZ = dz / len;
       const angle = Math.atan2(dx, dz);
-      const ribsInSegment = Math.max(1, Math.floor(len / RIB_SPACING));
+      const beamsInSegment = Math.max(1, Math.floor(len / BEAM_SPACING));
 
-      for (let r = 0; r < ribsInSegment; r++) {
-        const t = (r + 0.5) / ribsInSegment;
+      for (let r = 0; r < beamsInSegment; r++) {
+        const t = (r + 0.5) / beamsInSegment;
         const px = ax + dirX * len * t;
         const pz = az + dirZ * len * t;
 
-        _euler.set(Math.PI / 2, 0, -angle);
+        _euler.set(0, angle, 0);
         _quat.setFromEuler(_euler);
-        _mat4.compose(
-          new THREE.Vector3(px, UNDERGROUND_Y, pz),
-          _quat,
-          new THREE.Vector3(1, 1, 1),
-        );
+        _pos.set(px, UNDERGROUND_Y + TUNNEL_HEIGHT - 0.08, pz);
+        _mat4.compose(_pos, _quat, _one);
         mesh.setMatrixAt(idx++, _mat4);
       }
     }
     mesh.instanceMatrix.needsUpdate = true;
   }, [nodes, connections]);
 
-  if (ribCount === 0) return null;
+  if (beamCount === 0) return null;
 
   return (
-    <instancedMesh ref={ribRef} args={[undefined, undefined, ribCount]} frustumCulled={false}>
-      <torusGeometry args={[RIB_INNER_RADIUS + (RIB_OUTER_RADIUS - RIB_INNER_RADIUS) / 2, (RIB_OUTER_RADIUS - RIB_INNER_RADIUS) / 2, 6, 16]} />
-      <meshStandardMaterial
-        color="#3a3530"
-        roughness={0.3}
-        metalness={0.85}
-      />
+    <instancedMesh ref={beamRef} args={[undefined, undefined, beamCount]} frustumCulled={false}>
+      <boxGeometry args={[TUNNEL_RADIUS * 2, 0.15, 0.15]} />
+      <meshStandardMaterial color="#4a4a40" roughness={0.4} metalness={0.7} />
     </instancedMesh>
   );
 }
 
 // ── Tunnel lights (instanced along connections) ──
 
+const MAX_UNDERGROUND_LIGHTS = 6;
+
 function TunnelLights({ nodes, connections }: { nodes: PipeNode[]; connections: PipeConnection[] }) {
   const lightFixtureRef = useRef<THREE.InstancedMesh>(null);
+  const lightPoolRefs = useRef<(THREE.PointLight | null)[]>([]);
 
   const lightData = useMemo(() => {
     const nodeMap = new Map<string, PipeNode>();
@@ -240,17 +230,23 @@ function TunnelLights({ nodes, connections }: { nodes: PipeNode[]; connections: 
       const dx = bx - ax, dz = bz - az;
       const len = Math.sqrt(dx * dx + dz * dz);
 
-      // One light every ~6 units along the tunnel
       const lightCount = Math.max(1, Math.round(len / 6));
       for (let i = 0; i < lightCount; i++) {
         const t = (i + 0.5) / lightCount;
         positions.push([
           ax + dx * t,
-          UNDERGROUND_Y + TUNNEL_RADIUS * 0.7,
+          UNDERGROUND_Y + TUNNEL_HEIGHT - 0.3,
           az + dz * t,
         ]);
       }
     }
+
+    for (const node of nodes) {
+      const [nx, ny, nz] = node.undergroundPosition;
+      positions.push([nx, ny + TUNNEL_HEIGHT + 3, nz]);     // shaft glow
+      positions.push([nx, ny + TUNNEL_HEIGHT * 0.6, nz]);   // chamber ambient
+    }
+
     return positions;
   }, [nodes, connections]);
 
@@ -258,31 +254,56 @@ function TunnelLights({ nodes, connections }: { nodes: PipeNode[]; connections: 
     const mesh = lightFixtureRef.current;
     if (!mesh) return;
 
-    for (let i = 0; i < lightData.length; i++) {
+    const fixtureCount = lightData.length - nodes.length * 2;
+    for (let i = 0; i < fixtureCount; i++) {
       _mat4.makeTranslation(lightData[i][0], lightData[i][1], lightData[i][2]);
       mesh.setMatrixAt(i, _mat4);
     }
     mesh.instanceMatrix.needsUpdate = true;
-  }, [lightData]);
+  }, [lightData, nodes.length]);
 
-  if (lightData.length === 0) return null;
+  useFrame(() => {
+    const { localPosition } = useGameStore.getState();
+    const [px, , pz] = localPosition;
+
+    const distances: Array<{ idx: number; distSq: number }> = [];
+    for (let i = 0; i < lightData.length; i++) {
+      const dx = px - lightData[i][0];
+      const dz = pz - lightData[i][2];
+      distances.push({ idx: i, distSq: dx * dx + dz * dz });
+    }
+    distances.sort((a, b) => a.distSq - b.distSq);
+
+    for (let i = 0; i < MAX_UNDERGROUND_LIGHTS; i++) {
+      const light = lightPoolRefs.current[i];
+      if (!light) continue;
+      if (i < distances.length) {
+        const pos = lightData[distances[i].idx];
+        light.position.set(pos[0], pos[1], pos[2]);
+        light.visible = true;
+      } else {
+        light.visible = false;
+      }
+    }
+  });
+
+  const fixtureCount = lightData.length - nodes.length * 2;
+  if (fixtureCount <= 0) return null;
 
   return (
     <>
-      {/* Light fixture geometry */}
-      <instancedMesh ref={lightFixtureRef} args={[undefined, undefined, lightData.length]} frustumCulled={false}>
-        <boxGeometry args={[0.3, 0.08, 0.15]} />
-        <meshBasicMaterial color={PIPE_GLOW_DIM} />
+      <instancedMesh ref={lightFixtureRef} args={[undefined, undefined, fixtureCount]} frustumCulled={false}>
+        <boxGeometry args={[0.4, 0.06, 0.2]} />
+        <meshBasicMaterial color={PIPE_GLOW} transparent opacity={0.5} />
       </instancedMesh>
 
-      {/* Actual point lights (only place a few for performance) */}
-      {lightData.filter((_, i) => i % 2 === 0).map((pos, i) => (
+      {Array.from({ length: MAX_UNDERGROUND_LIGHTS }, (_, i) => (
         <pointLight
-          key={`tl_${i}`}
-          position={pos}
-          color="#0a3320"
-          intensity={0.8}
-          distance={8}
+          key={`pool_${i}`}
+          ref={(el) => { lightPoolRefs.current[i] = el; }}
+          color="#22cc66"
+          intensity={3}
+          distance={15}
         />
       ))}
     </>
@@ -296,91 +317,70 @@ function NodeChamber({ node }: { node: PipeNode }) {
 
   return (
     <group position={[x, y, z]}>
-      {/* Chamber dome (larger cylindrical room) */}
-      <mesh>
-        <cylinderGeometry args={[CHAMBER_RADIUS, CHAMBER_RADIUS, TUNNEL_RADIUS * 2, 20, 1, true]} />
-        <meshStandardMaterial
-          color="#2a2a28"
-          roughness={0.35}
-          metalness={0.75}
-          side={THREE.BackSide}
-        />
+      {/* Chamber ceiling */}
+      <mesh position={[0, TUNNEL_HEIGHT, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[CHAMBER_RADIUS * 2, CHAMBER_RADIUS * 2]} />
+        <meshStandardMaterial color="#2a2a28" roughness={0.9} metalness={0.05} side={THREE.DoubleSide} />
       </mesh>
 
-      {/* Chamber ceiling cap */}
-      <mesh position={[0, TUNNEL_RADIUS, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <circleGeometry args={[CHAMBER_RADIUS, 20]} />
-        <meshStandardMaterial
-          color="#222220"
-          roughness={0.4}
-          metalness={0.7}
-          side={THREE.BackSide}
-        />
-      </mesh>
-
-      {/* Chamber floor */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -TUNNEL_RADIUS + 0.01, 0]}>
-        <circleGeometry args={[CHAMBER_RADIUS, 20]} />
-        <meshStandardMaterial color="#1a1c1a" roughness={0.6} metalness={0.5} />
-      </mesh>
-
-      {/* Vertical exit shaft (pipe going up to the surface) */}
-      <mesh position={[0, TUNNEL_RADIUS + 1.5, 0]}>
+      {/* Vertical exit shaft */}
+      <mesh position={[0, TUNNEL_HEIGHT + 1.5, 0]}>
         <cylinderGeometry args={[0.8, 0.8, 3, 12, 1, true]} />
-        <meshStandardMaterial
-          color="#2a2a28"
-          roughness={0.35}
-          metalness={0.75}
-          side={THREE.BackSide}
-        />
+        <meshStandardMaterial color="#3a3a38" roughness={0.35} metalness={0.75} side={THREE.DoubleSide} />
       </mesh>
 
-      {/* Ladder rungs inside the shaft */}
+      {/* Shaft top cap */}
+      <mesh position={[0, TUNNEL_HEIGHT + 3, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.8, 12]} />
+        <meshStandardMaterial color="#1a1a18" roughness={0.5} metalness={0.6} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Ladder rungs inside shaft */}
       {[0.5, 1.0, 1.5, 2.0, 2.5].map((ly, i) => (
-        <mesh key={`rung_${i}`} position={[0, TUNNEL_RADIUS + ly, 0.6]} rotation={[0, 0, Math.PI / 2]}>
+        <mesh key={`rung_${i}`} position={[0, TUNNEL_HEIGHT + ly, 0.6]} rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.04, 0.04, 0.6, 6]} />
           <meshStandardMaterial color="#666655" roughness={0.3} metalness={0.8} />
         </mesh>
       ))}
 
-      {/* Glow from the surface (light at top of shaft) */}
-      <pointLight
-        position={[0, TUNNEL_RADIUS + 3, 0]}
-        color={PIPE_GLOW}
-        intensity={1.5}
-        distance={6}
-      />
-
-      {/* Green marker light on floor (indicates exit point) */}
-      <mesh position={[0, -TUNNEL_RADIUS + 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      {/* Green floor marker (exit point) */}
+      <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <ringGeometry args={[0.5, 0.7, 12]} />
         <meshBasicMaterial color={PIPE_GLOW} transparent opacity={0.4} />
       </mesh>
 
-      {/* Chamber ambient light */}
-      <pointLight
-        position={[0, 0.5, 0]}
-        color="#0a3320"
-        intensity={1.5}
-        distance={6}
-      />
-
-      {/* Reinforcement ring at chamber top */}
-      <mesh position={[0, TUNNEL_RADIUS - 0.1, 0]}>
-        <torusGeometry args={[CHAMBER_RADIUS, 0.08, 6, 20]} />
-        <meshStandardMaterial color="#3a3530" roughness={0.3} metalness={0.85} />
+      {/* Shaft light glow */}
+      <mesh position={[0, TUNNEL_HEIGHT + 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[0.7, 12]} />
+        <meshBasicMaterial color={PIPE_GLOW_DIM} transparent opacity={0.25} />
       </mesh>
 
-      {/* Reinforcement ring at chamber bottom */}
-      <mesh position={[0, -TUNNEL_RADIUS + 0.1, 0]}>
-        <torusGeometry args={[CHAMBER_RADIUS, 0.08, 6, 20]} />
-        <meshStandardMaterial color="#3a3530" roughness={0.3} metalness={0.85} />
-      </mesh>
+      {/* Room name label */}
+      <Html position={[0, TUNNEL_HEIGHT - 0.5, 0]} center distanceFactor={10} zIndexRange={[40, 0]} style={{ pointerEvents: 'none' }}>
+        <div style={{
+          background: 'rgba(0, 15, 8, 0.85)',
+          border: `1px solid ${PIPE_GLOW_DIM}`,
+          borderRadius: 6,
+          padding: '3px 10px',
+          color: PIPE_GLOW,
+          fontFamily: "'Courier New', monospace",
+          fontSize: 11,
+          fontWeight: 700,
+          textAlign: 'center',
+          whiteSpace: 'nowrap',
+          userSelect: 'none',
+        }}>
+          <div>{node.roomName}</div>
+          <div style={{ fontSize: 9, color: '#00aa55', marginTop: 1 }}>EXIT ↑</div>
+        </div>
+      </Html>
     </group>
   );
 }
 
 // ── Underground tunnels composite ──
+
+const PIPE_VISUAL_RANGE_SQ = 25 * 25;
 
 function UndergroundTunnels({ nodes, connections }: { nodes: PipeNode[]; connections: PipeConnection[] }) {
   const nodeMap = useMemo(() => {
@@ -389,29 +389,70 @@ function UndergroundTunnels({ nodes, connections }: { nodes: PipeNode[]; connect
     return map;
   }, [nodes]);
 
+  const [nearbyNodeIds, setNearbyNodeIds] = useState<Set<string>>(() => new Set());
+
+  useFrame(() => {
+    const { localPosition } = useGameStore.getState();
+    const [px, , pz] = localPosition;
+    const nearby = new Set<string>();
+    for (const node of nodes) {
+      const [nx, , nz] = node.undergroundPosition;
+      const dx = px - nx;
+      const dz = pz - nz;
+      if (dx * dx + dz * dz < PIPE_VISUAL_RANGE_SQ) {
+        nearby.add(node.id);
+      }
+    }
+    setNearbyNodeIds((prev) => {
+      if (prev.size !== nearby.size) return nearby;
+      for (const id of nearby) {
+        if (!prev.has(id)) return nearby;
+      }
+      return prev;
+    });
+  });
+
+  const visibleConnections = useMemo(() => {
+    return connections.filter(
+      (conn) => nearbyNodeIds.has(conn.nodeA) || nearbyNodeIds.has(conn.nodeB),
+    );
+  }, [connections, nearbyNodeIds]);
+
   return (
     <group>
-      {/* Ambient underground light (very dim) */}
-      <ambientLight intensity={0.05} color="#0a2a15" />
+      {/* Ceiling void blocker */}
+      <mesh position={[0, UNDERGROUND_Y + TUNNEL_HEIGHT + 0.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[200, 200]} />
+        <meshBasicMaterial color="#050505" side={THREE.DoubleSide} />
+      </mesh>
 
-      {/* Tunnel tube segments */}
-      {connections.map((conn, i) => {
+      {/* Floor */}
+      <mesh position={[0, UNDERGROUND_Y - 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[200, 200]} />
+        <meshStandardMaterial color="#1a1c1a" roughness={0.7} metalness={0.15} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* Ambient underground light */}
+      <ambientLight intensity={0.15} color="#0a3320" />
+
+      {/* Rectangular tunnel segments (only nearby) */}
+      {visibleConnections.map((conn) => {
         const a = nodeMap.get(conn.nodeA);
         const b = nodeMap.get(conn.nodeB);
         if (!a || !b) return null;
-        return <PipeTunnelSegment key={i} from={a.undergroundPosition} to={b.undergroundPosition} />;
+        return <PipeTunnelSegment key={`${conn.nodeA}-${conn.nodeB}`} from={a.undergroundPosition} to={b.undergroundPosition} />;
       })}
 
-      {/* Reinforcement ribs along all tunnels */}
-      <TunnelRibs nodes={nodes} connections={connections} />
+      {/* Ceiling support beams (instanced) */}
+      <TunnelBeams nodes={nodes} connections={connections} />
 
       {/* Tunnel lights */}
       <TunnelLights nodes={nodes} connections={connections} />
 
-      {/* Node chambers */}
-      {nodes.map((node) => (
-        <NodeChamber key={node.id} node={node} />
-      ))}
+      {/* Node chambers (only nearby) */}
+      {nodes.map((node) =>
+        nearbyNodeIds.has(node.id) ? <NodeChamber key={node.id} node={node} /> : null,
+      )}
     </group>
   );
 }
@@ -420,6 +461,7 @@ function UndergroundTunnels({ nodes, connections }: { nodes: PipeNode[]; connect
 
 function PipeInteraction({ nodes }: { nodes: PipeNode[] }) {
   const [nearestPipe, setNearestPipe] = useState<{ node: PipeNode; isUnderground: boolean } | null>(null);
+  const [cooldownLeft, setCooldownLeft] = useState(0);
 
   useFrame(() => {
     const { localPlayerId, players, localPosition } = useGameStore.getState();
@@ -429,6 +471,13 @@ function PipeInteraction({ nodes }: { nodes: PipeNode[] }) {
 
     const isUnderground = mySnap.isUnderground;
     const [px, , pz] = localPosition;
+
+    if (!isUnderground && mySnap.pipeCooldownEnd > 0) {
+      const remaining = Math.max(0, Math.ceil((mySnap.pipeCooldownEnd - Date.now()) / 1000));
+      setCooldownLeft(remaining);
+    } else {
+      setCooldownLeft(0);
+    }
 
     let nearest: PipeNode | null = null;
     let nearestDistSq = PIPE_INTERACT_RANGE_SQ;
@@ -451,7 +500,6 @@ function PipeInteraction({ nodes }: { nodes: PipeNode[] }) {
     }
   });
 
-  // Listen for E key to enter/exit pipe
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const tag = (e.target as HTMLElement)?.tagName;
@@ -465,9 +513,16 @@ function PipeInteraction({ nodes }: { nodes: PipeNode[] }) {
       const socket = useNetworkStore.getState().socket;
       if (!socket) return;
 
+      const pipeLock = gameStore.mazeSnapshot?.pipeLockStates?.[nearestPipe.node.id];
+      if (pipeLock?.isLocked) return;
+
       if (nearestPipe.isUnderground) {
+        gameStore.exitPipe(nearestPipe.node.surfacePosition);
         socket.emit('pipe:exit', { pipeNodeId: nearestPipe.node.id });
       } else {
+        const mySnap = gameStore.localPlayerId ? gameStore.players[gameStore.localPlayerId] : null;
+        if (mySnap && mySnap.pipeCooldownEnd > Date.now()) return;
+        gameStore.enterPipe(nearestPipe.node.undergroundPosition, nearestPipe.node.id);
         socket.emit('pipe:enter', { pipeNodeId: nearestPipe.node.id });
       }
     }
@@ -476,42 +531,117 @@ function PipeInteraction({ nodes }: { nodes: PipeNode[] }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [nearestPipe]);
 
+  useEffect(() => {
+    let lockConsumed = false;
+    function onKeyDown(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.code !== 'KeyR' || lockConsumed) return;
+      lockConsumed = true;
+
+      const gameStore = useGameStore.getState();
+      if (gameStore.taskOverlayVisible || gameStore.targetingMode || gameStore.teleportMapOpen || gameStore.hackerPanelOpen) return;
+
+      if (!nearestPipe) return;
+      const socket = useNetworkStore.getState().socket;
+      if (!socket) return;
+
+      const pipeLock = gameStore.mazeSnapshot?.pipeLockStates?.[nearestPipe.node.id];
+      if (pipeLock?.isLocked && pipeLock.hackerLockExpiresAt > 0 && pipeLock.hackerLockExpiresAt > Date.now()) return;
+
+      socket.emit('pipe:lock', { pipeNodeId: nearestPipe.node.id });
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code === 'KeyR') lockConsumed = false;
+    }
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, [nearestPipe]);
+
   if (!nearestPipe) return null;
 
   const target = nearestPipe.isUnderground
     ? nearestPipe.node.undergroundPosition
     : nearestPipe.node.surfacePosition;
 
+  const onCooldown = !nearestPipe.isUnderground && cooldownLeft > 0;
+
+  const mazeSnap = useGameStore.getState().mazeSnapshot;
+  const pipeLock = mazeSnap?.pipeLockStates?.[nearestPipe.node.id];
+  const isLocked = pipeLock?.isLocked ?? false;
+  const isHackerLocked = isLocked && (pipeLock?.hackerLockExpiresAt ?? 0) > Date.now();
+  const hackerLockSecsLeft = isHackerLocked
+    ? Math.ceil(((pipeLock?.hackerLockExpiresAt ?? 0) - Date.now()) / 1000)
+    : 0;
+
+  const borderColor = isLocked ? '#ff4444' : onCooldown ? '#ff6644' : PIPE_GLOW;
+  const textColor = isLocked ? '#ff4444' : onCooldown ? '#ff6644' : PIPE_GLOW;
+
   return (
     <Html position={[target[0], target[1] + 2, target[2]]} center>
       <div style={{
         background: 'rgba(0, 15, 8, 0.92)',
-        border: `2px solid ${PIPE_GLOW}`,
+        border: `2px solid ${borderColor}`,
         borderRadius: 10,
         padding: '8px 16px',
         textAlign: 'center',
         fontFamily: "'Courier New', monospace",
-        color: PIPE_GLOW,
+        color: textColor,
         pointerEvents: 'none',
         whiteSpace: 'nowrap',
-        boxShadow: `0 0 15px rgba(0, 255, 136, 0.2)`,
+        boxShadow: `0 0 15px ${isLocked ? 'rgba(255, 68, 68, 0.2)' : onCooldown ? 'rgba(255, 102, 68, 0.2)' : 'rgba(0, 255, 136, 0.2)'}`,
       }}>
         <div style={{ fontSize: 12, fontWeight: 700 }}>
           {nearestPipe.isUnderground
             ? `EXIT: ${nearestPipe.node.roomName}`
             : `PIPE: ${nearestPipe.node.roomName}`}
         </div>
-        <div style={{ fontSize: 11, marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-          <span style={{
-            background: PIPE_GLOW,
-            color: '#000',
-            borderRadius: 3,
-            padding: '1px 6px',
-            fontWeight: 'bold',
-            fontSize: 11,
-          }}>E</span>
-          <span>{nearestPipe.isUnderground ? 'Climb up' : 'Enter pipe'}</span>
-        </div>
+        {isLocked ? (
+          <div style={{ fontSize: 11, marginTop: 4 }}>
+            {isHackerLocked
+              ? `LOCKED (${hackerLockSecsLeft}s)`
+              : 'LOCKED'}
+            {!isHackerLocked && (
+              <div style={{ fontSize: 10, marginTop: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                <span style={{ background: '#ff4444', color: '#000', borderRadius: 3, padding: '1px 6px', fontWeight: 'bold', fontSize: 10 }}>R</span>
+                <span>Unlock</span>
+              </div>
+            )}
+          </div>
+        ) : onCooldown ? (
+          <div style={{ fontSize: 11, marginTop: 4, color: '#ff6644' }}>
+            Cooldown {cooldownLeft}s
+          </div>
+        ) : (
+          <div style={{ fontSize: 11, marginTop: 4, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{
+                background: PIPE_GLOW,
+                color: '#000',
+                borderRadius: 3,
+                padding: '1px 6px',
+                fontWeight: 'bold',
+                fontSize: 11,
+              }}>E</span>
+              <span>{nearestPipe.isUnderground ? 'Climb up' : 'Enter pipe'}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{
+                background: '#ff8800',
+                color: '#000',
+                borderRadius: 3,
+                padding: '1px 6px',
+                fontWeight: 'bold',
+                fontSize: 10,
+              }}>R</span>
+              <span style={{ fontSize: 10 }}>Lock</span>
+            </div>
+          </div>
+        )}
       </div>
     </Html>
   );
@@ -521,6 +651,10 @@ function PipeInteraction({ nodes }: { nodes: PipeNode[] }) {
 
 export function PipeSystem() {
   const mazeLayout = useGameStore((st) => st.mazeLayout);
+  const isUnderground = useGameStore((st) => {
+    const id = st.localPlayerId;
+    return id ? st.players[id]?.isUnderground ?? false : false;
+  });
 
   const pipeNodes = mazeLayout?.pipeNodes;
   const pipeConnections = mazeLayout?.pipeConnections;
@@ -530,7 +664,9 @@ export function PipeSystem() {
   return (
     <>
       <PipeEntries nodes={pipeNodes} />
-      <UndergroundTunnels nodes={pipeNodes} connections={pipeConnections} />
+      {isUnderground && (
+        <UndergroundTunnels nodes={pipeNodes} connections={pipeConnections} />
+      )}
       <PipeInteraction nodes={pipeNodes} />
     </>
   );

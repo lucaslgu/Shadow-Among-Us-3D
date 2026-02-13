@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useMemo } from 'react';
+import { useRef, useEffect, useCallback, useMemo, useState } from 'react';
 import { useGameStore } from '../stores/game-store.js';
 import type { PipeNode } from '@shadow/shared';
 
@@ -6,33 +6,62 @@ import type { PipeNode } from '@shadow/shared';
 
 const PIPE_GREEN = '#00ff88';
 const PIPE_GREEN_DIM = '#00aa55';
-const BG_COLOR = 'rgba(4, 12, 6, 0.95)';
-const NODE_RADIUS = 18;
-const PLAYER_MARKER_RADIUS = 6;
+const BG_COLOR = 'rgba(4, 12, 6, 0.92)';
+const NODE_RADIUS = 24;
+const PLAYER_MARKER_RADIUS = 8;
+const CONNECTION_WIDTH = 4;
 
 /**
- * PipeMapOverlay — shows the underground pipe network schematic when
- * the local player is underground. Displays current position and exit
- * locations as a navigation aid. Players must walk through tunnels.
+ * PipeMapOverlay — fullscreen pipe network schematic toggled by holding M.
+ * Shows current position and exit locations as a navigation aid.
  */
 export function PipeMapOverlay() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
+  const [visible, setVisible] = useState(false);
+  const visibleRef = useRef(false);
 
   const isUnderground = useGameStore((st) => {
     const id = st.localPlayerId;
     if (!id) return false;
     return st.players[id]?.isUnderground ?? false;
   });
-  const currentPipeNodeId = useGameStore((st) => {
-    const id = st.localPlayerId;
-    if (!id) return null;
-    return st.players[id]?.currentPipeNodeId ?? null;
-  });
   const mazeLayout = useGameStore((st) => st.mazeLayout);
 
   const pipeNodes = mazeLayout?.pipeNodes;
   const pipeConnections = mazeLayout?.pipeConnections;
+
+  // M key hold-to-show (only when underground)
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.code === 'KeyM' && !visibleRef.current) {
+        visibleRef.current = true;
+        setVisible(true);
+      }
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code === 'KeyM') {
+        visibleRef.current = false;
+        setVisible(false);
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
+
+  // Auto-hide when returning to surface
+  useEffect(() => {
+    if (!isUnderground) {
+      visibleRef.current = false;
+      setVisible(false);
+    }
+  }, [isUnderground]);
 
   // Pre-compute bounding box and projection for the node positions
   const projection = useMemo(() => {
@@ -49,20 +78,23 @@ export function PipeMapOverlay() {
 
     const rangeX = maxX - minX || 1;
     const rangeZ = maxZ - minZ || 1;
-    const padding = 60;
 
-    return { minX, maxX, minZ, maxZ, rangeX, rangeZ, padding };
+    return { minX, maxX, minZ, maxZ, rangeX, rangeZ };
   }, [pipeNodes]);
 
   // Map world position (x, z) to canvas pixel position
   const worldToCanvas = useCallback((wx: number, wz: number, canvasW: number, canvasH: number) => {
     if (!projection) return { cx: 0, cy: 0 };
-    const { minX, minZ, rangeX, rangeZ, padding } = projection;
-    const drawW = canvasW - padding * 2;
-    const drawH = canvasH - padding * 2;
+    const { minX, minZ, rangeX, rangeZ } = projection;
+    // Keep aspect ratio: fit the larger range and center the smaller one
+    const maxRange = Math.max(rangeX, rangeZ);
+    const padding = 80;
+    const drawSize = Math.min(canvasW, canvasH) - padding * 2;
+    const offsetX = (canvasW - drawSize) / 2;
+    const offsetY = (canvasH - drawSize) / 2;
     return {
-      cx: padding + ((wx - minX) / rangeX) * drawW,
-      cy: padding + ((wz - minZ) / rangeZ) * drawH,
+      cx: offsetX + ((wx - minX) / maxRange) * drawSize + (maxRange - rangeX) / maxRange * drawSize / 2,
+      cy: offsetY + ((wz - minZ) / maxRange) * drawSize + (maxRange - rangeZ) / maxRange * drawSize / 2,
     };
   }, [projection]);
 
@@ -74,19 +106,22 @@ export function PipeMapOverlay() {
 
   // Render loop
   useEffect(() => {
-    if (!isUnderground || !pipeNodes || !pipeConnections || !projection) return;
+    if (!visible || !isUnderground || !pipeNodes || !pipeConnections || !projection) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const size = 350;
+    // Fullscreen sizing
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const mapSize = Math.min(vw, vh) * 0.85;
     const dpr = Math.min(window.devicePixelRatio, 2);
-    canvas.width = size * dpr;
-    canvas.height = size * dpr;
-    canvas.style.width = `${size}px`;
-    canvas.style.height = `${size}px`;
+    canvas.width = mapSize * dpr;
+    canvas.height = mapSize * dpr;
+    canvas.style.width = `${mapSize}px`;
+    canvas.style.height = `${mapSize}px`;
 
     const cw = canvas.width;
     const ch = canvas.height;
@@ -102,36 +137,57 @@ export function PipeMapOverlay() {
       // Background
       ctx!.fillStyle = BG_COLOR;
       ctx!.beginPath();
-      ctx!.roundRect(0, 0, cw, ch, 12 * dpr);
+      ctx!.roundRect(0, 0, cw, ch, 16 * dpr);
       ctx!.fill();
 
       // Border
       ctx!.strokeStyle = PIPE_GREEN_DIM;
       ctx!.lineWidth = 2 * dpr;
       ctx!.beginPath();
-      ctx!.roundRect(0, 0, cw, ch, 12 * dpr);
+      ctx!.roundRect(0, 0, cw, ch, 16 * dpr);
       ctx!.stroke();
+
+      // Scan line effect (subtle horizontal lines)
+      ctx!.strokeStyle = 'rgba(0, 255, 136, 0.03)';
+      ctx!.lineWidth = 1;
+      for (let y = 0; y < ch; y += 4 * dpr) {
+        ctx!.beginPath();
+        ctx!.moveTo(0, y);
+        ctx!.lineTo(cw, y);
+        ctx!.stroke();
+      }
 
       // Title
       ctx!.fillStyle = PIPE_GREEN;
-      ctx!.font = `bold ${11 * dpr}px 'Courier New', monospace`;
+      ctx!.font = `bold ${16 * dpr}px 'Courier New', monospace`;
       ctx!.textAlign = 'center';
-      ctx!.fillText('PIPE NETWORK', cw / 2, 20 * dpr);
+      ctx!.fillText('REDE DE TÚNEIS', cw / 2, 30 * dpr);
 
       // Subtitle
       ctx!.fillStyle = PIPE_GREEN_DIM;
-      ctx!.font = `${8 * dpr}px 'Courier New', monospace`;
-      ctx!.fillText('Walk to an exit | E to climb up', cw / 2, 32 * dpr);
+      ctx!.font = `${10 * dpr}px 'Courier New', monospace`;
+      ctx!.fillText('Caminhe até uma saída | E para subir | Solte M para fechar', cw / 2, 46 * dpr);
 
-      // Draw connections
-      ctx!.strokeStyle = 'rgba(0, 170, 85, 0.4)';
-      ctx!.lineWidth = 3 * dpr;
+      // Draw connections (thick tunnel lines)
       for (const conn of pipeConnections!) {
         const nodeA = pipeNodes!.find(n => n.id === conn.nodeA);
         const nodeB = pipeNodes!.find(n => n.id === conn.nodeB);
         if (!nodeA || !nodeB) continue;
         const a = nodeToCanvas(nodeA, cw, ch);
         const b = nodeToCanvas(nodeB, cw, ch);
+
+        // Tunnel outline (darker, thicker)
+        ctx!.strokeStyle = 'rgba(0, 100, 50, 0.6)';
+        ctx!.lineWidth = (CONNECTION_WIDTH + 4) * dpr;
+        ctx!.lineCap = 'round';
+        ctx!.beginPath();
+        ctx!.moveTo(a.cx, a.cy);
+        ctx!.lineTo(b.cx, b.cy);
+        ctx!.stroke();
+
+        // Tunnel fill
+        ctx!.strokeStyle = 'rgba(0, 170, 85, 0.35)';
+        ctx!.lineWidth = CONNECTION_WIDTH * dpr;
         ctx!.beginPath();
         ctx!.moveTo(a.cx, a.cy);
         ctx!.lineTo(b.cx, b.cy);
@@ -149,7 +205,7 @@ export function PipeMapOverlay() {
           ctx!.save();
           ctx!.beginPath();
           ctx!.arc(cx, cy, r * 2.5, 0, Math.PI * 2);
-          ctx!.fillStyle = 'rgba(0, 255, 136, 0.2)';
+          ctx!.fillStyle = 'rgba(0, 255, 136, 0.15)';
           ctx!.fill();
           ctx!.restore();
         }
@@ -165,17 +221,17 @@ export function PipeMapOverlay() {
 
         // Exit arrow (small upward arrow icon inside node)
         ctx!.fillStyle = isCurrent ? PIPE_GREEN : PIPE_GREEN_DIM;
-        ctx!.font = `${8 * dpr}px 'Courier New', monospace`;
+        ctx!.font = `${10 * dpr}px 'Courier New', monospace`;
         ctx!.textAlign = 'center';
         ctx!.textBaseline = 'middle';
         ctx!.fillText('\u2191', cx, cy); // ↑ arrow
 
         // Room name label
         ctx!.fillStyle = isCurrent ? '#ffffff' : PIPE_GREEN;
-        ctx!.font = `${8 * dpr}px 'Courier New', monospace`;
+        ctx!.font = `${9 * dpr}px 'Courier New', monospace`;
         ctx!.textAlign = 'center';
         ctx!.textBaseline = 'top';
-        ctx!.fillText(node.roomName, cx, cy + r + 3 * dpr);
+        ctx!.fillText(node.roomName, cx, cy + r + 4 * dpr);
       }
 
       // Draw player position marker (real-time from localPosition)
@@ -187,8 +243,8 @@ export function PipeMapOverlay() {
       const pulse = 0.6 + 0.4 * Math.sin(Date.now() / 300);
       ctx!.save();
       ctx!.beginPath();
-      ctx!.arc(plrCx, plrCy, plrR * 3, 0, Math.PI * 2);
-      ctx!.fillStyle = `rgba(0, 255, 136, ${0.15 * pulse})`;
+      ctx!.arc(plrCx, plrCy, plrR * 3.5, 0, Math.PI * 2);
+      ctx!.fillStyle = `rgba(0, 255, 136, ${0.12 * pulse})`;
       ctx!.fill();
       ctx!.restore();
 
@@ -198,38 +254,41 @@ export function PipeMapOverlay() {
       ctx!.fillStyle = PIPE_GREEN;
       ctx!.fill();
       ctx!.strokeStyle = '#ffffff';
-      ctx!.lineWidth = 1.5 * dpr;
+      ctx!.lineWidth = 2 * dpr;
       ctx!.stroke();
 
-      // "YOU" label
+      // "VOCÊ" label
       ctx!.fillStyle = '#ffffff';
-      ctx!.font = `bold ${7 * dpr}px 'Courier New', monospace`;
+      ctx!.font = `bold ${9 * dpr}px 'Courier New', monospace`;
       ctx!.textAlign = 'center';
       ctx!.textBaseline = 'bottom';
-      ctx!.fillText('YOU', plrCx, plrCy - plrR - 2 * dpr);
+      ctx!.fillText('VOCÊ', plrCx, plrCy - plrR - 3 * dpr);
 
       rafRef.current = requestAnimationFrame(draw);
     }
 
     draw();
     return () => cancelAnimationFrame(rafRef.current);
-  }, [isUnderground, pipeNodes, pipeConnections, projection, nodeToCanvas, worldToCanvas]);
+  }, [visible, isUnderground, pipeNodes, pipeConnections, projection, nodeToCanvas, worldToCanvas]);
 
-  if (!isUnderground || !pipeNodes || pipeNodes.length === 0 || !pipeConnections) return null;
+  if (!visible || !isUnderground || !pipeNodes || pipeNodes.length === 0 || !pipeConnections) return null;
 
   return (
     <div style={{
       position: 'absolute',
-      bottom: 20,
-      right: 20,
-      zIndex: 25,
+      inset: 0,
+      zIndex: 40,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(0, 0, 0, 0.6)',
       pointerEvents: 'none',
     }}>
       <canvas
         ref={canvasRef}
         style={{
-          borderRadius: 12,
-          boxShadow: '0 0 30px rgba(0, 255, 136, 0.15)',
+          borderRadius: 16,
+          boxShadow: '0 0 60px rgba(0, 255, 136, 0.2), 0 0 120px rgba(0, 255, 136, 0.08)',
         }}
       />
     </div>

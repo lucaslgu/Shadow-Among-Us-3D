@@ -8,8 +8,10 @@ export {
   isSunVisible,
   getSunElevation,
   getSunDirection2D,
+  getSimulationEvents,
+  getBodyStates,
   OVERHEAD_ELEVATION,
 } from './environment/sun-simulation.js';
-export type { LorenzState, SunPosition, SunSimulationState } from './environment/sun-simulation.js';
+export type { BodyState, SunPosition, SunSimulationState, SimulationEvents, InitialConfig } from './environment/sun-simulation.js';
 export { isRayBlockedByWalls } from './environment/ray-occlusion.js';
 export type { OcclusionContext } from './environment/ray-occlusion.js';

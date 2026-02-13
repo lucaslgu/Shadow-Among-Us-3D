@@ -58,6 +58,7 @@ interface GameState {
   cosmicScenario: CosmicScenario | null;
   eraGravity: number | null;
   eraDescription: string | null;
+  systemEnergy: number | null; // N-body total energy (dev indicator)
 
   // Task overlay
   activeTaskId: string | null;
@@ -71,6 +72,7 @@ interface GameState {
     taskType: TaskType;
     state: TaskCompletionState;
     isBusy: boolean;
+    distanceSq: number;
   } | null;
 
   // Target selection (for powers that require a target)
@@ -125,6 +127,9 @@ interface GameState {
     stats: { tasksCompleted: number; totalTasks: number; gameDurationSec: number };
   } | null;
 
+  // Dev mode
+  devMode: boolean;
+
   // Actions
   setPhase: (phase: GamePhase) => void;
   setLocalPlayer: (playerId: string) => void;
@@ -160,6 +165,8 @@ interface GameState {
   setHasVoted: (voted: boolean) => void;
   setNearestKillTargetId: (targetId: string | null) => void;
   setSelectedGuideTaskId: (taskId: string | null) => void;
+  enterPipe: (undergroundPosition: [number, number, number], pipeNodeId: string) => void;
+  exitPipe: (surfacePosition: [number, number, number]) => void;
   setGameEndResult: (
     winner: 'crew' | 'shadow' | 'draw',
     reason: string,
@@ -188,6 +195,7 @@ const initialState = {
   cosmicScenario: null as CosmicScenario | null,
   eraGravity: null as number | null,
   eraDescription: null as string | null,
+  systemEnergy: null as number | null,
   activeTaskId: null as string | null,
   activeTaskType: null as TaskType | null,
   taskOverlayVisible: false,
@@ -218,6 +226,7 @@ const initialState = {
   nearestKillTargetId: null as string | null,
   selectedGuideTaskId: null as string | null,
   gameEndResult: null as GameState['gameEndResult'],
+  devMode: false,
 };
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -413,6 +422,39 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   setGhostPossessCooldownEnd: (time) =>
     set({ ghostPossessCooldownEnd: time }),
+
+  enterPipe: (undergroundPosition, pipeNodeId) => {
+    const state = get();
+    const pid = state.localPlayerId;
+    if (!pid) return;
+    const snap = state.players[pid];
+    if (!snap) return;
+    // Optimistic: update local position + player snapshot
+    set({
+      localPosition: [...undergroundPosition],
+      pendingInputs: [], // clear predictions — position will jump
+      players: {
+        ...state.players,
+        [pid]: { ...snap, isUnderground: true, currentPipeNodeId: pipeNodeId, position: [...undergroundPosition], undergroundTimeLeft: 40 },
+      },
+    });
+  },
+
+  exitPipe: (surfacePosition) => {
+    const state = get();
+    const pid = state.localPlayerId;
+    if (!pid) return;
+    const snap = state.players[pid];
+    if (!snap) return;
+    set({
+      localPosition: [...surfacePosition],
+      pendingInputs: [],
+      players: {
+        ...state.players,
+        [pid]: { ...snap, isUnderground: false, currentPipeNodeId: null, position: [...surfacePosition], undergroundTimeLeft: 0, pipeCooldownEnd: Date.now() + 20_000 },
+      },
+    });
+  },
 
   setNearestBodyId: (bodyId) => set({ nearestBodyId: bodyId }),
 

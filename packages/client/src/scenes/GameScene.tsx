@@ -16,6 +16,7 @@ import { DoorInteraction } from '../maze/DoorInteraction.js';
 import { TaskInteraction } from '../maze/TaskInteraction.js';
 import { OxygenInteraction } from '../maze/OxygenInteraction.js';
 import { TaskGuide } from '../maze/TaskGuide.js';
+import { OxygenPathGuide } from '../maze/OxygenPathGuide.js';
 import { MindControlPiP } from '../ui/MindControlPiP.js';
 import { PipeSystem } from '../maze/PipeSystem.js';
 import { MeetingTable } from '../entities/MeetingTable.js';
@@ -226,22 +227,61 @@ function PlayingScene() {
   const localPlayerId = useGameStore((st) => st.localPlayerId);
   const currentEra = useGameStore((st) => st.currentEra);
   const playerIds = usePlayerIds();
+  const isUnderground = useGameStore((st) => {
+    const id = st.localPlayerId;
+    return id ? st.players[id]?.isUnderground ?? false : false;
+  });
 
   const myColor = (localPlayerId ? playerInfo[localPlayerId]?.color : null) ?? '#ffffff';
 
   return (
     <>
-      {/* Three-Body Problem environmental system (suns, fog, particles, bloom) */}
-      <ThreeBodyEnvironment currentEra={currentEra as 'stable' | 'chaosInferno' | 'chaosIce' | undefined} />
+      {/* Surface elements — hidden when player is underground */}
+      {!isUnderground && (
+        <>
+          {/* Three-Body Problem environmental system (suns, fog, particles, bloom) */}
+          <ThreeBodyEnvironment currentEra={currentEra as 'stable' | 'chaosInferno' | 'chaosIce' | undefined} />
 
-      {/* Spaceship deck floor */}
-      <SpaceshipFloor />
+          {/* Spaceship deck floor */}
+          <SpaceshipFloor />
 
-      {/* Glass viewport ceiling */}
-      <GlassCeiling />
+          {/* Glass viewport ceiling */}
+          <GlassCeiling />
 
-      {/* Maze labyrinth */}
-      <MazeRenderer />
+          {/* Maze labyrinth */}
+          <MazeRenderer />
+
+          {/* Door interaction prompt */}
+          <DoorInteraction />
+
+          {/* Task interaction prompt */}
+          <TaskInteraction />
+
+          {/* Oxygen generator interaction */}
+          <OxygenInteraction />
+
+          {/* Task pathfinding guide line */}
+          <TaskGuide />
+
+          {/* Oxygen generator pathfinding guide (golden) */}
+          <OxygenPathGuide />
+
+          {/* Central meeting table */}
+          <MeetingTable />
+
+          {/* Emergency button interaction */}
+          <EmergencyButtonInteraction />
+
+          {/* Dead bodies on the ground */}
+          <DeadBodies />
+
+          {/* Body report interaction */}
+          <BodyInteraction />
+
+          {/* Kill interaction (shadow proximity check + Space key) */}
+          <KillInteraction />
+        </>
+      )}
 
       {/* Local player */}
       <LocalPlayer color={myColor} />
@@ -260,38 +300,11 @@ function PlayingScene() {
         );
       })}
 
-      {/* Door interaction prompt */}
-      <DoorInteraction />
-
-      {/* Task interaction prompt */}
-      <TaskInteraction />
-
-      {/* Oxygen generator interaction */}
-      <OxygenInteraction />
-
-      {/* Task pathfinding guide line */}
-      <TaskGuide />
-
       {/* Hacker aim mode overlay */}
       <HackerAimMode />
 
       {/* Mind Control PiP viewport */}
       <MindControlPiP />
-
-      {/* Central meeting table */}
-      <MeetingTable />
-
-      {/* Emergency button interaction */}
-      <EmergencyButtonInteraction />
-
-      {/* Dead bodies on the ground */}
-      <DeadBodies />
-
-      {/* Body report interaction */}
-      <BodyInteraction />
-
-      {/* Kill interaction (shadow proximity check + Space key) */}
-      <KillInteraction />
 
       {/* Underground pipe system */}
       <PipeSystem />
@@ -302,10 +315,10 @@ function PlayingScene() {
       {/* Post-processing: Bloom for suns/fire glow + Vignette for atmosphere */}
       <EffectComposer multisampling={0}>
         <Bloom
-          intensity={0.8}
-          luminanceThreshold={0.6}
-          luminanceSmoothing={0.3}
-          mipmapBlur
+          intensity={0.6}
+          luminanceThreshold={0.8}
+          luminanceSmoothing={0.2}
+          levels={3}
         />
         <Vignette
           offset={0.3}
@@ -382,7 +395,8 @@ export function GameScene() {
         shadows
         camera={{ position: [5, 5, 5], fov: 60 }}
         style={{ width: '100%', height: '100%' }}
-        gl={{ antialias: true, alpha: false }}
+        dpr={[1, 1.5]}
+        gl={{ antialias: false, alpha: false, powerPreference: 'high-performance' }}
         onCreated={({ gl }) => {
           gl.setClearColor('#0a0a0f');
         }}

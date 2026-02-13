@@ -102,7 +102,7 @@ export function LocalPlayer({ color }: { color: string }) {
     <>
       <group ref={groupRef}>
         {/* Capsule body — hidden in FPS view */}
-        <mesh position={[0, 0.6, 0]} castShadow visible={false}>
+        <mesh position={[0, 0.6, 0]} visible={false}>
           <capsuleGeometry args={[0.3, 0.6, 8, 16]} />
           <meshStandardMaterial color={color} roughness={0.5} metalness={0.3} />
         </mesh>
@@ -119,8 +119,8 @@ export function LocalPlayer({ color }: { color: string }) {
         intensity={600}
         distance={DEFAULT_GAME_SETTINGS.flashlightRange}
         castShadow
-        shadow-mapSize-width={512}
-        shadow-mapSize-height={512}
+        shadow-mapSize-width={256}
+        shadow-mapSize-height={256}
         color="#ffe4b5"
       />
     </>

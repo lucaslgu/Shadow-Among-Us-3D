@@ -186,9 +186,9 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
       navigateFn?.(`/lobby/${roomCode}`);
     });
 
-    socket.on('room:reconnected', ({ gameState, lobbyPlayers }) => {
+    socket.on('room:reconnected', ({ gameState, lobbyPlayers, gameData }) => {
       const roomCode = gameState.roomCode;
-      console.log(`[Client] Reconnected to room ${roomCode}`);
+      console.log(`[Client] Reconnected to room ${roomCode} (phase: ${gameState.phase})`);
       // Build readyStates from lobby players
       const readyStates: Record<string, boolean> = {};
       for (const p of lobbyPlayers) {
@@ -200,8 +200,29 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
         lobbyPlayers,
         readyStates,
       });
-      // Navigate to lobby
-      navigateFn?.(`/lobby/${roomCode}`);
+
+      // If game is in progress, restore game state and navigate to game
+      if (gameData && (gameState.phase === 'playing' || gameState.phase === 'meeting' || gameState.phase === 'loading')) {
+        const gameStore = useGameStore.getState();
+        const playerId = get().playerId;
+        if (playerId) gameStore.setLocalPlayer(playerId);
+        gameStore.setLocalRole(gameData.role as PlayerRole, gameData.power as PowerType, gameData.playerInfo);
+        if (gameData.devMode) useGameStore.setState({ devMode: true });
+        if (gameData.mazeLayout) gameStore.setMazeLayout(gameData.mazeLayout);
+        if (gameData.cosmicScenario) gameStore.setCosmicScenario(gameData.cosmicScenario);
+        if (gameData.assignedTasks) gameStore.setAssignedTasks(gameData.assignedTasks);
+        // Set phase to 'playing' directly — game is already running on server
+        gameStore.setPhase(gameState.phase === 'meeting' ? 'meeting' : 'playing');
+        set({ waitingForGame: false });
+        // Save session for future reconnects
+        const saved = getSavedSession();
+        const token = saved.token ?? get().sessionToken;
+        if (token) saveSession(token, get().playerName, roomCode);
+        navigateFn?.(`/game/${roomCode}`);
+      } else {
+        // Navigate to lobby
+        navigateFn?.(`/lobby/${roomCode}`);
+      }
     });
 
     socket.on('room:error', ({ message }) => {
@@ -239,11 +260,12 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
       }));
     });
 
-    socket.on('game:started', ({ role, power, playerInfo, mazeLayout, cosmicScenario, assignedTasks }) => {
+    socket.on('game:started', ({ role, power, playerInfo, mazeLayout, cosmicScenario, assignedTasks, devMode }) => {
       const gameStore = useGameStore.getState();
       const playerId = get().playerId;
       if (playerId) gameStore.setLocalPlayer(playerId);
       gameStore.setLocalRole(role as PlayerRole, power as PowerType, playerInfo);
+      if (devMode) useGameStore.setState({ devMode: true });
       if (mazeLayout) gameStore.setMazeLayout(mazeLayout);
       if (cosmicScenario) gameStore.setCosmicScenario(cosmicScenario);
       if (assignedTasks) gameStore.setAssignedTasks(assignedTasks);

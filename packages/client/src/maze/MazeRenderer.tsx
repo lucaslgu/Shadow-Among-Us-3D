@@ -8,9 +8,11 @@ import { playMuralhaDestroy } from '../audio/sound-manager.js';
 import { TaskStations } from './TaskStations.js';
 import { DecoObjects } from './DecoObjects.js';
 import { OxygenGenerators } from './OxygenGenerators.js';
+import { RoomEnvironments } from './RoomEnvironments.js';
 
 const WALL_HEIGHT = 4;
 const WALL_THICKNESS = 0.3;
+const CELL_SIZE = 10;
 const MAX_VISIBLE_LIGHTS = 6;
 const LIGHT_INTENSITY = 8;
 const LIGHT_DISTANCE = 15;
@@ -84,7 +86,7 @@ function StaticWalls({ walls }: { walls: WallSegment[] }) {
   if (walls.length === 0) return null;
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, walls.length]} castShadow receiveShadow frustumCulled={false}>
+    <instancedMesh ref={meshRef} args={[undefined, undefined, walls.length]} receiveShadow frustumCulled={false}>
       <boxGeometry args={[1, 1, 1]} />
       <meshStandardMaterial
         map={wallTex.map}
@@ -181,7 +183,7 @@ function MutableWalls({ walls }: { walls: WallSegment[] }) {
   if (walls.length === 0) return null;
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, walls.length]} castShadow receiveShadow frustumCulled={false}>
+    <instancedMesh ref={meshRef} args={[undefined, undefined, walls.length]} receiveShadow frustumCulled={false}>
       <boxGeometry args={[1, 1, 1]} />
       <meshStandardMaterial
         map={wallTex.map}
@@ -826,7 +828,6 @@ function MuralhaWalls() {
             ref={(m) => { if (m) meshRefsMap.current.set(state.ownerId, m); }}
             position={[cx, WALL_HEIGHT / 2, cz]}
             rotation={[0, angle, 0]}
-            castShadow
             receiveShadow
           >
             <boxGeometry args={[MURALHA_THICKNESS, WALL_HEIGHT, length]} />
@@ -844,6 +845,44 @@ function MuralhaWalls() {
         );
       })}
     </group>
+  );
+}
+
+// ── Room Ceilings (InstancedMesh) ──
+
+const CEILING_MAT = new THREE.MeshStandardMaterial({
+  color: '#1a1e28',
+  roughness: 0.25,
+  metalness: 0.9,
+});
+
+function RoomCeilings({ rooms }: { rooms: MazeRoomInfo[] }) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    for (let i = 0; i < rooms.length; i++) {
+      const [rx, , rz] = rooms[i].position;
+      _pos.set(rx, WALL_HEIGHT, rz);
+      _scale.set(CELL_SIZE, 0.15, CELL_SIZE);
+      _matrix.compose(_pos, _identityQuat, _scale);
+      mesh.setMatrixAt(i, _matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [rooms]);
+
+  if (rooms.length === 0) return null;
+
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[undefined, undefined, rooms.length]}
+      frustumCulled={false}
+      material={CEILING_MAT}
+    >
+      <boxGeometry args={[1, 1, 1]} />
+    </instancedMesh>
   );
 }
 
@@ -910,10 +949,12 @@ export function MazeRenderer() {
       <RoomSigns rooms={mazeLayout.rooms} doors={mazeLayout.doors} />
       <CellLights lights={mazeLayout.lights} />
       <MuralhaWalls />
+      <RoomCeilings rooms={mazeLayout.rooms} />
       <ShelterMarkers shelters={mazeLayout.shelterZones ?? []} />
       <TaskStations />
       <DecoObjects />
       <OxygenGenerators />
+      <RoomEnvironments />
     </group>
   );
 }

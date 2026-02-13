@@ -17,10 +17,11 @@ import type {
 } from '@shadow/shared';
 import { DEFAULT_GAME_SETTINGS, PowerType, POWER_CONFIGS, generateMaze, createInitialMazeSnapshot } from '@shadow/shared';
 import type { CosmicScenario } from '@shadow/shared';
-import { startGameLoop, activatePower, deactivatePower, findNearbyPlayers, attemptKill, interactDoor, startTask, completeTask, cancelTask, ghostStartTask, checkGameOver, createDeadBody, MAX_HEALTH, type GamePlayerState, type DeadBody } from './game/game-loop.js';
+import { startGameLoop, activatePower, deactivatePower, findNearbyPlayers, attemptKill, interactDoor, lockDoor, startTask, completeTask, cancelTask, ghostStartTask, checkGameOver, createDeadBody, MAX_HEALTH, type GamePlayerState, type DeadBody } from './game/game-loop.js';
 import { generateCosmicScenario } from './services/gemini.js';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
+const IS_DEV = process.env.NODE_ENV !== 'production';
 const DISCONNECT_GRACE_MS = 30_000;
 
 const app = express();
@@ -258,6 +259,7 @@ function endGame(room: RoomData, winner: 'crew' | 'shadow' | 'draw', reason: str
 
 function checkGameEndConditions(room: RoomData) {
   if (room.phase !== 'playing' || !room.gamePlayers) return;
+  if (IS_DEV) return; // Dev mode: game never auto-ends
 
   const players = Array.from(room.gamePlayers.values());
 
@@ -505,6 +507,7 @@ function resumeGame(room: RoomData) {
     room.cosmicScenario, room.deadBodies,
     (era) => { room.currentEra = era; },
     () => { checkGameEndConditions(room); },
+    { devMode: IS_DEV },
   );
 
   console.log(`[Meeting] Game resumed in room ${room.roomCode}`);
@@ -670,9 +673,35 @@ io.on('connection', (socket) => {
         }
 
         socket.join(oldSession.roomCode);
-        console.log(`[Server] ${oldSession.playerName} reconnected to room ${oldSession.roomCode}`);
+        console.log(`[Server] ${oldSession.playerName} reconnected to room ${oldSession.roomCode} (phase: ${room.phase})`);
 
-        socket.emit('room:reconnected', { gameState: buildGameState(room), lobbyPlayers: buildLobbyPlayers(room) });
+        // If game is in progress, update GamePlayerState.socketId and send game data
+        let gameData: { role: string; power: PowerType; playerInfo: Record<string, { name: string; color: string }>; mazeLayout: MazeLayout; cosmicScenario: CosmicScenario; assignedTasks: string[]; devMode?: boolean } | undefined;
+        if (room.gamePlayers && (room.phase === 'playing' || room.phase === 'meeting' || room.phase === 'loading')) {
+          const gp = room.gamePlayers.get(oldToken);
+          if (gp) {
+            // Update socketId so game loop sends snapshots to the new socket
+            gp.socketId = socket.id;
+
+            // Build playerInfo from all current gamePlayers
+            const playerInfo: Record<string, { name: string; color: string }> = {};
+            for (const [, gpOther] of room.gamePlayers) {
+              playerInfo[gpOther.socketId] = { name: gpOther.name, color: gpOther.color };
+            }
+
+            gameData = {
+              role: gp.role,
+              power: gp.power as PowerType,
+              playerInfo,
+              mazeLayout: room.mazeLayout!,
+              cosmicScenario: room.cosmicScenario!,
+              assignedTasks: gp.assignedTasks,
+              devMode: IS_DEV,
+            };
+          }
+        }
+
+        socket.emit('room:reconnected', { gameState: buildGameState(room), lobbyPlayers: buildLobbyPlayers(room), gameData });
         broadcastPlayerList(room);
         return;
       }
@@ -921,7 +950,7 @@ io.on('connection', (socket) => {
       io.to(room.roomCode).emit('game:phase-change', { phase: 'playing' });
 
       // Start game loop now that everyone is ready
-      room.gameTickInterval = startGameLoop(io, room.roomCode, room.gamePlayers, room.mazeLayout!, room.mazeSnapshot!, room.cosmicScenario!, room.deadBodies, (era) => { room.currentEra = era; }, () => { checkGameEndConditions(room); });
+      room.gameTickInterval = startGameLoop(io, room.roomCode, room.gamePlayers, room.mazeLayout!, room.mazeSnapshot!, room.cosmicScenario!, room.deadBodies, (era) => { room.currentEra = era; }, () => { checkGameEndConditions(room); }, { devMode: IS_DEV });
       console.log(`[Server] All players loaded — game started in room ${room.roomCode}`);
     }
   });
@@ -954,8 +983,9 @@ io.on('connection', (socket) => {
     gp.inputQueue.push(inputData);
   });
 
-  // --- DEBUG: Cycle Power (TODO: remove after testing) ---
+  // --- DEBUG: Cycle Power ---
   socket.on('debug:cycle-power', () => {
+    if (!IS_DEV) return;
     const token = socketToSession.get(socket.id);
     if (!token) return;
     const sess = sessions.get(token);
@@ -979,6 +1009,49 @@ io.on('connection', (socket) => {
     gp.powerActiveEnd = 0;
     socket.emit('debug:power-changed', { power: allPowers[nextIdx] });
     console.log(`[DEBUG] ${gp.name} power changed to: ${allPowers[nextIdx]}`);
+  });
+
+  // --- DEBUG: Toggle Role (crew <-> shadow) ---
+  socket.on('debug:toggle-role', () => {
+    if (!IS_DEV) return;
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp) return;
+    gp.role = gp.role === 'crew' ? 'shadow' : 'crew';
+    if (gp.role === 'shadow') gp.killCooldownEnd = 0;
+    socket.emit('debug:role-changed', { role: gp.role, power: gp.power as PowerType });
+    console.log(`[DEBUG] ${gp.name} role toggled to: ${gp.role}`);
+  });
+
+  // --- DEBUG: Self-Kill (become ghost for testing) ---
+  socket.on('debug:self-kill', () => {
+    if (!IS_DEV) return;
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive) return;
+    gp.isAlive = false;
+    gp.isGhost = true;
+    gp.health = 0;
+    const body = createDeadBody(gp);
+    room.deadBodies.set(body.bodyId, body);
+    socket.emit('ghost:death-screen', { cause: 'debug_self_kill', killerId: null });
+    io.to(room.roomCode).emit('kill:occurred', {
+      killerId: gp.socketId,
+      victimId: gp.socketId,
+      bodyId: body.bodyId,
+      bodyPosition: { x: gp.position[0], y: gp.position[1], z: gp.position[2] },
+    });
+    console.log(`[DEBUG] ${gp.name} self-killed for testing`);
   });
 
   // --- Power Request Targets (for target-selection UI) ---
@@ -1012,7 +1085,7 @@ io.on('connection', (socket) => {
   });
 
   // --- Power Activate (toggle) ---
-  socket.on('power:activate', ({ targetId, wallPosition, teleportPosition }) => {
+  socket.on('power:activate', ({ targetId, wallPosition, teleportPosition, teleportFromMap }) => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
     const sess = sessions.get(token);
@@ -1022,7 +1095,7 @@ io.on('connection', (socket) => {
     if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
     const gp = room.gamePlayers.get(token);
     if (!gp || !gp.isAlive) return;
-    activatePower(io, room.roomCode, gp, room.gamePlayers, targetId, room.mazeSnapshot ?? undefined, wallPosition, room.currentEra, teleportPosition);
+    activatePower(io, room.roomCode, gp, room.gamePlayers, targetId, room.mazeSnapshot ?? undefined, wallPosition, room.currentEra, teleportPosition, teleportFromMap);
   });
 
   // --- Power Deactivate ---
@@ -1049,7 +1122,7 @@ io.on('connection', (socket) => {
     if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
     const gp = room.gamePlayers.get(token);
     if (!gp || !gp.isAlive) return;
-    attemptKill(io, room.roomCode, gp, room.gamePlayers, targetId, DEFAULT_GAME_SETTINGS.killCooldown, room.deadBodies);
+    attemptKill(io, room.roomCode, gp, room.gamePlayers, targetId, DEFAULT_GAME_SETTINGS.killCooldown, room.deadBodies, IS_DEV);
   });
 
   // --- Body Report (player reports a dead body) ---
@@ -1216,6 +1289,19 @@ io.on('connection', (socket) => {
     interactDoor(gp, doorId, room.mazeLayout, room.mazeSnapshot);
   });
 
+  // --- Door Lock (player presses R near a door to lock/unlock) ---
+  socket.on('door:lock', ({ doorId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeLayout || !room.mazeSnapshot) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive) return;
+    lockDoor(gp, doorId, room.mazeLayout, room.mazeSnapshot);
+  });
+
   // --- Oxygen Refill (player interacts with an oxygen generator) ---
   socket.on('oxygen:start-refill', ({ generatorId }) => {
     const token = socketToSession.get(socket.id);
@@ -1230,6 +1316,10 @@ io.on('connection', (socket) => {
     // Check generator exists
     const gen = room.mazeLayout.oxygenGenerators?.find(g => g.id === generatorId);
     if (!gen) return;
+
+    // Check if generator is disabled by hacker
+    const disabledUntil = room.mazeSnapshot?.disabledGenerators?.[generatorId];
+    if (disabledUntil && Date.now() < disabledUntil) return;
 
     // Check proximity
     const dx = gp.position[0] - gen.position[0];
@@ -1468,6 +1558,12 @@ io.on('connection', (socket) => {
     const gp = room.gamePlayers.get(token);
     if (!gp || !gp.isAlive || gp.isUnderground) return;
 
+    // Check if pipe is locked
+    if (room.mazeSnapshot?.pipeLockStates?.[pipeNodeId]?.isLocked) return;
+
+    // 20-second cooldown after exiting pipe
+    if (gp.pipeCooldownEnd > Date.now()) return;
+
     // Find the pipe node
     const pipeNode = room.mazeLayout.pipeNodes?.find(p => p.id === pipeNodeId);
     if (!pipeNode) return;
@@ -1481,6 +1577,7 @@ io.on('connection', (socket) => {
     gp.position = [...pipeNode.undergroundPosition];
     gp.isUnderground = true;
     gp.currentPipeNodeId = pipeNodeId;
+    gp.undergroundEnteredAt = Date.now();
     console.log(`[PIPE] ${gp.name} entered pipe at ${pipeNode.roomName}`);
   });
 
@@ -1495,6 +1592,9 @@ io.on('connection', (socket) => {
     const gp = room.gamePlayers.get(token);
     if (!gp || !gp.isAlive || !gp.isUnderground) return;
 
+    // Check if pipe exit is locked
+    if (room.mazeSnapshot?.pipeLockStates?.[pipeNodeId]?.isLocked) return;
+
     // Find the pipe node
     const pipeNode = room.mazeLayout.pipeNodes?.find(p => p.id === pipeNodeId);
     if (!pipeNode) return;
@@ -1508,12 +1608,54 @@ io.on('connection', (socket) => {
     gp.position = [...pipeNode.surfacePosition];
     gp.isUnderground = false;
     gp.currentPipeNodeId = null;
+    gp.undergroundEnteredAt = 0;
+    gp.pipeCooldownEnd = Date.now() + 20_000;
     console.log(`[PIPE] ${gp.name} exited pipe at ${pipeNode.roomName}`);
+  });
+
+  // --- Pipe: Lock/Unlock (any player, R key) ---
+  socket.on('pipe:lock', ({ pipeNodeId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeLayout || !room.mazeSnapshot) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive) return;
+
+    const pipeNode = room.mazeLayout.pipeNodes?.find(p => p.id === pipeNodeId);
+    if (!pipeNode) return;
+
+    // Check proximity (from either surface or underground side)
+    const checkPos = gp.isUnderground ? pipeNode.undergroundPosition : pipeNode.surfacePosition;
+    const dx = gp.position[0] - checkPos[0];
+    const dz = gp.position[2] - checkPos[2];
+    if (dx * dx + dz * dz > 6 * 6) return;
+
+    const pipeLock = room.mazeSnapshot.pipeLockStates[pipeNodeId];
+    if (!pipeLock) return;
+
+    if (pipeLock.isLocked) {
+      // Hacker locks can't be unlocked
+      if (pipeLock.hackerLockExpiresAt > 0 && Date.now() < pipeLock.hackerLockExpiresAt) return;
+      // Normal unlock
+      pipeLock.isLocked = false;
+      pipeLock.lockedBy = null;
+      pipeLock.hackerLockExpiresAt = 0;
+    } else {
+      // Lock (any player, from either side)
+      pipeLock.isLocked = true;
+      pipeLock.lockedBy = gp.socketId;
+      pipeLock.hackerLockExpiresAt = 0; // normal lock, no auto-expire
+    }
   });
 
   // pipe:travel removed — players now walk through tunnels instead of teleporting
 
-  // --- Hacker Action (lock door / toggle light) ---
+  // --- Hacker Action (lock door / toggle light / lock pipe / disable generator / drain O2) ---
+  const HACKER_LOCK_DURATION = 40_000; // 40 seconds unbreakable lock
+
   socket.on('hacker:action', ({ targetType, targetId }) => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
@@ -1525,21 +1667,20 @@ io.on('connection', (socket) => {
     const gp = room.gamePlayers.get(token);
     if (!gp || !gp.isAlive || !gp.powerActive || gp.power !== PowerType.HACKER) return;
 
+    const now = Date.now();
+
     if (targetType === 'door') {
       const doorState = room.mazeSnapshot.doorStates[targetId];
       if (!doorState) return;
-      // Toggle lock
-      if (doorState.isLocked && doorState.lockedBy === gp.socketId) {
-        doorState.isLocked = false;
-        doorState.isOpen = false;
-        doorState.lockedBy = null;
-        gp.hackerLockedDoors = gp.hackerLockedDoors.filter(id => id !== targetId);
-      } else if (!doorState.isLocked) {
-        doorState.isLocked = true;
-        doorState.isOpen = false;
-        doorState.lockedBy = gp.socketId;
-        gp.hackerLockedDoors.push(targetId);
-      }
+      // Hacker locks are unbreakable — can only lock, not unlock
+      if (doorState.isLocked) return; // Already locked (by anyone) — no action
+      // Lock with 40s timer
+      doorState.isLocked = true;
+      doorState.isOpen = false;
+      doorState.lockedBy = gp.socketId;
+      doorState.hackerLockExpiresAt = now + HACKER_LOCK_DURATION;
+      doorState.lockedAt = now;
+      gp.hackerLockedDoors.push(targetId);
     }
 
     if (targetType === 'light') {
@@ -1558,13 +1699,42 @@ io.on('connection', (socket) => {
         const wasClosed = room.mazeSnapshot.dynamicWallStates[targetId] !== false;
         room.mazeSnapshot.dynamicWallStates[targetId] = !wasClosed;
         if (!wasClosed) {
-          // Was open, now closing — remove from toggled list
           gp.hackerToggledWalls = gp.hackerToggledWalls.filter(id => id !== targetId);
         } else {
-          // Was closed, now opening — add to toggled list
           gp.hackerToggledWalls.push(targetId);
         }
       }
+    }
+
+    if (targetType === 'pipe') {
+      const pipeLock = room.mazeSnapshot.pipeLockStates[targetId];
+      if (!pipeLock) return;
+      if (pipeLock.isLocked) return; // Already locked — no action
+      pipeLock.isLocked = true;
+      pipeLock.lockedBy = gp.socketId;
+      pipeLock.hackerLockExpiresAt = now + HACKER_LOCK_DURATION;
+      gp.hackerLockedPipes.push(targetId);
+    }
+
+    if (targetType === 'oxygen_generator') {
+      // Disable generator for 40s (prevents refill)
+      if (room.mazeSnapshot.disabledGenerators[targetId]) return; // Already disabled
+      room.mazeSnapshot.disabledGenerators[targetId] = now + HACKER_LOCK_DURATION;
+      gp.hackerDisabledGenerators.push(targetId);
+      // Cancel any active refill on this generator
+      for (const [, rgp] of room.gamePlayers) {
+        if (rgp.oxygenRefillGeneratorId === targetId) {
+          rgp.oxygenRefillGeneratorId = null;
+          rgp.oxygenRefillStartTime = 0;
+        }
+      }
+    }
+
+    if (targetType === 'oxygen_drain') {
+      // Drain 15% of ship oxygen (max 2 per activation)
+      if (gp.hackerDrainCount >= 2) return;
+      room.mazeSnapshot.shipOxygen = Math.max(0, room.mazeSnapshot.shipOxygen - 15);
+      gp.hackerDrainCount++;
     }
   });
 
@@ -1579,7 +1749,7 @@ io.on('connection', (socket) => {
     if (!room || room.hostId !== socket.id || room.phase !== 'lobby') return;
 
     // Check all players are ready and minimum count
-    if (room.players.size < 2) return;
+    if (!IS_DEV && room.players.size < 2) return;
     for (const [, player] of room.players) {
       if (!player.ready) return;
     }
@@ -1589,7 +1759,9 @@ io.on('connection', (socket) => {
 
     // Assign roles
     const playerTokens = Array.from(room.players.keys());
-    const shadowCount = Math.max(1, Math.floor(playerTokens.length / 3));
+    const shadowCount = IS_DEV && playerTokens.length === 1
+      ? 0
+      : Math.max(1, Math.floor(playerTokens.length / 3));
     const shuffled = [...playerTokens].sort(() => Math.random() - 0.5);
     const shadowTokens = new Set(shuffled.slice(0, shadowCount));
 
@@ -1691,6 +1863,9 @@ io.on('connection', (socket) => {
         hackerLockedDoors: [],
         hackerToggledLights: [],
         hackerToggledWalls: [],
+        hackerLockedPipes: [],
+        hackerDisabledGenerators: [],
+        hackerDrainCount: 0,
         muralhaWalls: [],
         muralhaNextWallId: 0,
         health: MAX_HEALTH,
@@ -1708,6 +1883,8 @@ io.on('connection', (socket) => {
         killCooldownEnd: 0,
         isUnderground: false,
         currentPipeNodeId: null,
+        undergroundEnteredAt: 0,
+        pipeCooldownEnd: 0,
         emergencyButtonCooldownEnd: 0,
         emergencyButtonUsesLeft: 1,
       };
@@ -1741,6 +1918,7 @@ io.on('connection', (socket) => {
           mazeLayout,
           cosmicScenario,
           assignedTasks: gp.assignedTasks,
+          devMode: IS_DEV,
         });
       }
     }

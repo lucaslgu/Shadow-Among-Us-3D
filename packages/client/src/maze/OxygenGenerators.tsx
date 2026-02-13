@@ -8,6 +8,10 @@ const _pos = new THREE.Vector3();
 const _scale = new THREE.Vector3();
 const _quat = new THREE.Quaternion();
 
+const COLOR_BLUE = new THREE.Color('#44aaff');
+const COLOR_YELLOW = new THREE.Color('#ffaa22');
+const COLOR_RED = new THREE.Color('#ff3333');
+
 const TANK_RADIUS = 0.4;
 const TANK_HEIGHT = 1.8;
 
@@ -88,13 +92,13 @@ export function OxygenGenerators() {
     let emissiveIntensity: number;
 
     if (oxygen > 60) {
-      color = new THREE.Color('#44aaff');
+      color = COLOR_BLUE;
       emissiveIntensity = 0.3 + Math.sin(t * 2) * 0.1;
     } else if (oxygen > 25) {
-      color = new THREE.Color('#ffaa22');
+      color = COLOR_YELLOW;
       emissiveIntensity = 0.5 + Math.sin(t * 3) * 0.2;
     } else {
-      color = new THREE.Color('#ff3333');
+      color = COLOR_RED;
       emissiveIntensity = 0.8 + Math.sin(t * 5) * 0.3;
     }
 

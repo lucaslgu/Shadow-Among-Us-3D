@@ -59,6 +59,10 @@ export function OxygenInteraction() {
         if (currentOxygen >= 100) return;
         if (currentRefillPlayer && currentRefillPlayer !== myId) return;
 
+        // Don't start if generator is disabled by hacker
+        const disabledUntil = useGameStore.getState().mazeSnapshot?.disabledGenerators?.[gen.id];
+        if (disabledUntil && Date.now() < disabledUntil) return;
+
         socket.emit('oxygen:start-refill', { generatorId: gen.id });
         refillStartRef.current = Date.now();
       }
@@ -158,7 +162,7 @@ export function OxygenInteraction() {
           }}
         >
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: '#44aaff' }}>
-            Gerador O{'\u2082'} ({nearbyGen.roomName})
+            O2 Generator ({nearbyGen.roomName})
           </div>
 
           {isRefilling ? (
@@ -180,16 +184,16 @@ export function OxygenInteraction() {
                 }} />
               </div>
               <div style={{ fontSize: 11, color: '#4ade80', fontWeight: 600 }}>
-                Repondo... [G] cancelar
+                Refilling... [G] cancel
               </div>
             </div>
           ) : someoneElseRefilling ? (
             <div style={{ fontSize: 12, color: '#fbbf24', fontWeight: 600 }}>
-              Algu{'\u00E9'}m est{'\u00E1'} repondo...
+              Someone is refilling...
             </div>
           ) : oxyFull ? (
             <div style={{ fontSize: 12, color: '#6b6b8a' }}>
-              Oxig{'\u00EA'}nio cheio
+              Oxygen full
             </div>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
@@ -208,7 +212,7 @@ export function OxygenInteraction() {
                 G
               </span>
               <span style={{ fontSize: 13, color: '#aabbdd', fontWeight: 600 }}>
-                Repor Oxig{'\u00EA'}nio
+                Refill Oxygen
               </span>
             </div>
           )}

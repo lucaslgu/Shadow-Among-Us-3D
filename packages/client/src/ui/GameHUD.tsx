@@ -45,12 +45,14 @@ const HUD_KEYFRAMES = `
 
 interface PowerStateInfo {
   isActive: boolean;
+  activeEnd: number;
   cooldownEnd: number;
   targetId: string | null;
   powerUsesLeft: number;
+  metamorphEndTime: number;
 }
 
-const DEFAULT_POWER_STATE: PowerStateInfo = { isActive: false, cooldownEnd: 0, targetId: null, powerUsesLeft: 0 };
+const DEFAULT_POWER_STATE: PowerStateInfo = { isActive: false, activeEnd: 0, cooldownEnd: 0, targetId: null, powerUsesLeft: 0, metamorphEndTime: 0 };
 
 function extractPowerState(): PowerStateInfo {
   const { localPlayerId, players } = useGameStore.getState();
@@ -59,9 +61,11 @@ function extractPowerState(): PowerStateInfo {
   if (!snap) return DEFAULT_POWER_STATE;
   return {
     isActive: snap.powerActive,
+    activeEnd: snap.powerActiveEnd,
     cooldownEnd: snap.powerCooldownEnd,
     targetId: snap.mindControlTargetId,
     powerUsesLeft: snap.powerUsesLeft ?? 0,
+    metamorphEndTime: snap.metamorphEndTime ?? 0,
   };
 }
 
@@ -72,8 +76,10 @@ function usePowerState() {
     const unsub = useGameStore.subscribe(() => {
       const next = extractPowerState();
       setState((prev) => {
-        if (prev.isActive === next.isActive && prev.cooldownEnd === next.cooldownEnd &&
-            prev.targetId === next.targetId && prev.powerUsesLeft === next.powerUsesLeft) return prev;
+        if (prev.isActive === next.isActive && prev.activeEnd === next.activeEnd &&
+            prev.cooldownEnd === next.cooldownEnd &&
+            prev.targetId === next.targetId && prev.powerUsesLeft === next.powerUsesLeft &&
+            prev.metamorphEndTime === next.metamorphEndTime) return prev;
         return next;
       });
     });
@@ -96,6 +102,84 @@ function Bar({ pct, color, height = 5 }: { pct: number; color: string; height?: 
         borderRadius: height / 2,
         transition: 'width 0.15s linear',
       }} />
+    </div>
+  );
+}
+
+/* ========================================================================== */
+/*  Underground Oxygen Timer                                                    */
+/* ========================================================================== */
+
+const UNDERGROUND_MAX_SEC = 40;
+
+function UndergroundOxygenTimer() {
+  const isUnderground = useGameStore((st) => {
+    const id = st.localPlayerId;
+    return id ? st.players[id]?.isUnderground ?? false : false;
+  });
+  const timeLeft = useGameStore((st) => {
+    const id = st.localPlayerId;
+    return id ? st.players[id]?.undergroundTimeLeft ?? 0 : 0;
+  });
+
+  if (!isUnderground) return null;
+
+  const pct = (timeLeft / UNDERGROUND_MAX_SEC) * 100;
+  const isLow = timeLeft <= 10;
+  const isCritical = timeLeft <= 5;
+  const barColor = isCritical ? '#ef4444' : isLow ? '#fbbf24' : '#00ff88';
+  const secs = Math.ceil(timeLeft);
+
+  return (
+    <div style={{
+      ...CARD,
+      padding: '6px 14px',
+      minWidth: 200,
+      border: `1px solid ${isCritical ? 'rgba(239,68,68,0.5)' : isLow ? 'rgba(251,191,36,0.3)' : 'rgba(0,255,136,0.2)'}`,
+      animation: isCritical ? 'hudPulse 0.8s ease-in-out infinite' : undefined,
+      ['--pulse-color' as string]: 'rgba(239,68,68,0.5)',
+      pointerEvents: 'auto',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, color: barColor, textTransform: 'uppercase' }}>
+          O2 Underground
+        </span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: barColor, fontFamily: "'Courier New', monospace" }}>
+          {secs}s
+        </span>
+      </div>
+      <Bar pct={pct} color={barColor} height={6} />
+    </div>
+  );
+}
+
+/* ========================================================================== */
+/*  Top-left: Dev Mode Badge                                                   */
+/* ========================================================================== */
+
+function DevModeBadge() {
+  const devMode = useGameStore((st) => st.devMode);
+  if (!devMode) return null;
+
+  return (
+    <div style={{
+      ...CARD,
+      padding: '4px 10px',
+      border: '1px solid rgba(255, 200, 0, 0.4)',
+      background: 'rgba(255, 200, 0, 0.1)',
+    }}>
+      <div style={{
+        fontSize: 10,
+        fontWeight: 800,
+        letterSpacing: 1.5,
+        color: '#ffcc00',
+        marginBottom: 2,
+      }}>
+        DEV MODE
+      </div>
+      <div style={{ fontSize: 8, color: 'rgba(255, 200, 0, 0.6)', lineHeight: 1.3 }}>
+        P: Power | T: Role | K: Kill
+      </div>
     </div>
   );
 }
@@ -141,14 +225,14 @@ function DamageLabels() {
   if (isGhost) return null;
   if (!localPlayerId || !players[localPlayerId]) return null;
 
-  const { damageSource, inShelter, doorProtection } = players[localPlayerId];
-  if (damageSource === 'none' && !inShelter && !doorProtection) return null;
+  const { damageSource, inShelter } = players[localPlayerId];
+  if (damageSource === 'none' && !inShelter) return null;
 
   const LABELS: Record<string, { text: string; color: string }> = {
     heat: { text: 'HEAT', color: '#ff8844' },
     cold: { text: 'COLD', color: '#44aaff' },
     fire: { text: 'FIRE', color: '#ff4444' },
-    oxygen: { text: 'NO O\u2082', color: '#aa44ff' },
+    oxygen: { text: 'NO O2', color: '#aa44ff' },
   };
 
   const parts = damageSource !== 'none' ? damageSource.split('+') : [];
@@ -183,19 +267,6 @@ function DamageLabels() {
           SHELTER
         </span>
       )}
-      {doorProtection && !inShelter && (
-        <span style={{
-          background: 'rgba(68, 170, 255, 0.1)',
-          border: '1px solid rgba(68, 170, 255, 0.5)',
-          borderRadius: 4,
-          padding: '1px 8px',
-          fontSize: 10,
-          fontWeight: 700,
-          color: '#44aaff',
-        }}>
-          DOORS -50%
-        </span>
-      )}
     </div>
   );
 }
@@ -222,7 +293,7 @@ function OxygenBar() {
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
         <span style={{ fontSize: 10, fontWeight: 700, color: '#44aaff', letterSpacing: 1 }}>
-          O\u2082
+          O₂ of ship
         </span>
         <span style={{ fontSize: 10, fontWeight: 600, color: barColor }}>
           {pct}%
@@ -268,11 +339,8 @@ function OxygenGuide() {
   }
   const dist = Math.round(Math.sqrt(nearestDistSq));
 
-  const dx = nearestGen.position[0] - px;
-  const dz = nearestGen.position[2] - pz;
-  const angleDeg = (Math.atan2(dx, -dz) * 180) / Math.PI;
   const isUrgent = shipOxygen <= 0;
-  const color = isUrgent ? s.colors.danger : s.colors.warning;
+  const color = isUrgent ? s.colors.danger : '#ffaa22';
 
   return (
     <div style={{
@@ -282,17 +350,9 @@ function OxygenGuide() {
       borderRadius: 6,
       border: `1px solid ${color}44`,
     }}>
-      <span style={{
-        fontSize: 16, color, lineHeight: 1,
-        transform: `rotate(${angleDeg}deg)`,
-        transition: 'transform 0.3s ease',
-        display: 'inline-block',
-      }}>
-        {'\u2191'}
-      </span>
       <div>
         <div style={{ fontSize: 10, fontWeight: 700, color, letterSpacing: 0.5 }}>
-          {isUrgent ? 'REFILL NOW!' : 'O\u2082 Low'}
+          {isUrgent ? 'REFILL NOW!' : 'O2 Low — follow gold path'}
         </div>
         <div style={{ fontSize: 9, color: s.colors.textMuted }}>
           {nearestGen.roomName} · {dist}m · [G]
@@ -396,13 +456,7 @@ function TaskList() {
 
   return (
     <>
-      <style>{`
-        .hud-tasks::-webkit-scrollbar { width: 4px; }
-        .hud-tasks::-webkit-scrollbar-track { background: transparent; }
-        .hud-tasks::-webkit-scrollbar-thumb { background: ${s.colors.primary}88; border-radius: 2px; }
-        .hud-tasks { scrollbar-width: thin; scrollbar-color: ${s.colors.primary}88 transparent; }
-      `}</style>
-      <div className="hud-tasks" style={{
+      <div style={{
         ...CARD,
         padding: open ? '6px 10px' : '4px 10px',
         maxWidth: 'min(240px, 38vw)',
@@ -579,16 +633,15 @@ function EmergencyPrompt() {
 /*  Bottom-left: Power Status                                                  */
 /* ========================================================================== */
 
-function PowerStatus({ powerConfig, isActive, cooldownEnd, targetId, powerUsesLeft }: {
-  powerConfig: { displayName: string; type: PowerType; usesPerMatch: number };
+function PowerStatus({ powerConfig, isActive, activeEnd, cooldownEnd, targetId, powerUsesLeft, metamorphEndTime }: {
+  powerConfig: { displayName: string; type: PowerType; usesPerMatch: number; duration: number; cooldown: number };
   isActive: boolean;
+  activeEnd: number;
   cooldownEnd: number;
   targetId: string | null;
   powerUsesLeft: number;
+  metamorphEndTime: number;
 }) {
-  const now = Date.now();
-  const onCooldown = !isActive && cooldownEnd > now;
-  const cooldownSec = onCooldown ? Math.ceil((cooldownEnd - now) / 1000) : 0;
   const playerInfo = useGameStore((st) => st.playerInfo);
   const targetingMode = useGameStore((st) => st.targetingMode);
   const teleportMapOpen = useGameStore((st) => st.teleportMapOpen);
@@ -596,6 +649,53 @@ function PowerStatus({ powerConfig, isActive, cooldownEnd, targetId, powerUsesLe
   const isTeleport = powerConfig.type === PowerType.TELEPORT;
   const isMuralha = powerConfig.type === PowerType.MURALHA;
   const hasCharges = powerConfig.usesPerMatch > 1;
+  const hasDuration = powerConfig.duration > 0;
+
+  // Force re-render at 20fps for smooth progress bars (50ms), or 1fps when only text
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const now = Date.now();
+    const hasBar = isActive || cooldownEnd > now || metamorphEndTime > now;
+    if (!hasBar) return;
+    const id = setInterval(() => setTick((t) => t + 1), 50);
+    return () => clearInterval(id);
+  }, [isActive, cooldownEnd, metamorphEndTime]);
+
+  const now = Date.now();
+  const onCooldown = !isActive && cooldownEnd > now;
+  const cooldownSec = onCooldown ? Math.ceil((cooldownEnd - now) / 1000) : 0;
+  const activeSec = isActive && activeEnd > now ? Math.ceil((activeEnd - now) / 1000) : 0;
+  const isMetamorphed = metamorphEndTime > now;
+  const metamorphSec = isMetamorphed ? Math.ceil((metamorphEndTime - now) / 1000) : 0;
+
+  // Progress bar percentages
+  let barPct = 0;
+  let barColor = s.colors.primary;
+  let showBar = false;
+
+  if (isActive && hasDuration && activeEnd > now) {
+    // Active: depleting bar (100% → 0%)
+    barPct = ((activeEnd - now) / powerConfig.duration) * 100;
+    barColor = s.colors.success;
+    showBar = true;
+  } else if (onCooldown) {
+    // Cooldown: regenerating bar (0% → 100%)
+    const elapsed = powerConfig.cooldown - (cooldownEnd - now);
+    barPct = (elapsed / powerConfig.cooldown) * 100;
+    barColor = s.colors.warning;
+    showBar = true;
+  } else if (!isActive && !onCooldown && hasDuration) {
+    // Ready: full bar
+    barPct = 100;
+    barColor = s.colors.primary;
+    showBar = true;
+  }
+
+  // Metamorph transformation bar (separate from main power bar)
+  let morphBarPct = 0;
+  if (isMetamorphed) {
+    morphBarPct = ((metamorphEndTime - now) / POWER_CONFIGS[PowerType.METAMORPH].duration) * 100;
+  }
 
   let statusText: string;
   let statusColor: string;
@@ -606,10 +706,10 @@ function PowerStatus({ powerConfig, isActive, cooldownEnd, targetId, powerUsesLe
     statusText = 'Select target...';
     statusColor = s.colors.warning;
   } else if (isActive) {
-    statusText = 'Active · [Q] off';
+    statusText = activeSec > 0 ? `Active ${activeSec}s · [Q] off` : 'Active · [Q] off';
     statusColor = s.colors.success;
   } else if (onCooldown) {
-    statusText = `CD: ${cooldownSec}s`;
+    statusText = `Recharging ${cooldownSec}s`;
     statusColor = s.colors.warning;
   } else if ((isTeleport || isMuralha) && powerUsesLeft > 0) {
     statusText = isTeleport ? '[Q] use · hold=map' : '[Q] place';
@@ -628,7 +728,9 @@ function PowerStatus({ powerConfig, isActive, cooldownEnd, targetId, powerUsesLe
       padding: '6px 12px',
       minWidth: 'clamp(130px, 16vw, 180px)',
       pointerEvents: 'auto',
-      border: isActive ? `1px solid ${s.colors.success}66` : CARD.border,
+      border: isActive ? `1px solid ${s.colors.success}66`
+        : isMetamorphed ? `1px solid #8844ff66`
+        : CARD.border,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <span style={{
@@ -652,9 +754,29 @@ function PowerStatus({ powerConfig, isActive, cooldownEnd, targetId, powerUsesLe
       <div style={{ fontSize: 10, color: statusColor, marginTop: 2, fontWeight: 600 }}>
         {statusText}
       </div>
+      {/* Duration / cooldown progress bar */}
+      {showBar && (
+        <div style={{ marginTop: 4 }}>
+          <Bar pct={barPct} color={barColor} height={5} />
+        </div>
+      )}
       {isActive && powerConfig.type === PowerType.MIND_CONTROLLER && targetName && (
-        <div style={{ fontSize: 9, color: s.colors.warning, marginTop: 1 }}>
+        <div style={{ fontSize: 9, color: s.colors.warning, marginTop: 2 }}>
           Ctrl: {targetName} (Arrows)
+        </div>
+      )}
+      {/* Metamorph transformation timer */}
+      {isMetamorphed && (
+        <div style={{ marginTop: 4, padding: '3px 0' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+            <span style={{ fontSize: 9, fontWeight: 700, color: '#aa66ff', letterSpacing: 0.5 }}>
+              METAMORPH
+            </span>
+            <span style={{ fontSize: 9, fontWeight: 600, color: '#aa66ff' }}>
+              {metamorphSec}s
+            </span>
+          </div>
+          <Bar pct={morphBarPct} color="#aa66ff" height={4} />
         </div>
       )}
     </div>
@@ -771,6 +893,45 @@ function VitalsPanel() {
 }
 
 /* ========================================================================== */
+/*  Top bar: N-body system energy (dev only)                                   */
+/* ========================================================================== */
+
+function SystemEnergyBar() {
+  const devMode = useGameStore((st) => st.devMode);
+  const energy = useGameStore((st) => st.systemEnergy);
+  if (!devMode || energy == null) return null;
+
+  // Normalize energy for display — energy is negative (gravitational binding)
+  // More negative = more tightly bound. Show absolute value as a bar.
+  const absEnergy = Math.abs(energy);
+  const maxDisplay = 50000; // rough max for visual scaling
+  const fillPct = Math.min(100, (absEnergy / maxDisplay) * 100);
+
+  const isStable = absEnergy > 100; // bound system
+  const barColor = isStable ? '#8844ff' : '#ff4444';
+
+  return (
+    <div style={{
+      position: 'absolute', top: 0, left: '20%', right: '20%',
+      height: 3, background: 'rgba(0,0,0,0.4)',
+      borderRadius: '0 0 2px 2px', overflow: 'hidden',
+    }}>
+      <div style={{
+        width: `${fillPct}%`, height: '100%',
+        background: barColor, transition: 'width 1s ease',
+      }} />
+      <div style={{
+        position: 'absolute', top: 4, left: '50%', transform: 'translateX(-50%)',
+        fontSize: 8, color: 'rgba(136, 68, 255, 0.5)',
+        whiteSpace: 'nowrap', fontFamily: 'monospace',
+      }}>
+        E = {energy.toFixed(0)}
+      </div>
+    </div>
+  );
+}
+
+/* ========================================================================== */
 /*  Main HUD Layout                                                            */
 /* ========================================================================== */
 
@@ -779,7 +940,7 @@ export function GameHUD() {
   const power = useGameStore((st) => st.localPower);
   const phase = useGameStore((st) => st.phase);
   const isGhost = useGameStore((st) => st.isGhost);
-  const { isActive, cooldownEnd, targetId, powerUsesLeft } = usePowerState();
+  const { isActive, activeEnd, cooldownEnd, targetId, powerUsesLeft, metamorphEndTime } = usePowerState();
 
   if (phase !== 'playing') return null;
 
@@ -796,6 +957,9 @@ export function GameHUD() {
       {/* ── Global animations ── */}
       <style>{HUD_KEYFRAMES}</style>
 
+      {/* ── Dev: N-body energy indicator ── */}
+      <SystemEnergyBar />
+
       {/* ── Fullscreen overlays ── */}
       <DamageVignette />
       <Minimap />
@@ -808,9 +972,10 @@ export function GameHUD() {
         background: isGhost ? 'rgba(68,136,255,0.5)' : 'rgba(255,255,255,0.5)',
       }} />
 
-      {/* ── TOP-LEFT: Role ── */}
-      <div style={{ position: 'absolute', top: EDGE_V, left: EDGE }}>
+      {/* ── TOP-LEFT: Role + Dev badge ── */}
+      <div style={{ position: 'absolute', top: EDGE_V, left: EDGE, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <RoleBadge />
+        <DevModeBadge />
       </div>
 
       {/* ── TOP-CENTER: Status column ── */}
@@ -828,6 +993,7 @@ export function GameHUD() {
         <DamageLabels />
         <OxygenBar />
         <OxygenGuide />
+        <UndergroundOxygenTimer />
       </div>
 
       {/* ── TOP-RIGHT: Task list ── */}
@@ -859,9 +1025,11 @@ export function GameHUD() {
           <PowerStatus
             powerConfig={powerConfig}
             isActive={isActive}
+            activeEnd={activeEnd}
             cooldownEnd={cooldownEnd}
             targetId={targetId}
             powerUsesLeft={powerUsesLeft}
+            metamorphEndTime={metamorphEndTime}
           />
         </div>
       )}

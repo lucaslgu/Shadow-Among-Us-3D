@@ -128,12 +128,23 @@ export interface MazeSnapshot {
   dynamicWallStates: Record<string, boolean>; // true = closed (solid)
   muralhaWalls: MuralhaWall[]; // active barrier walls
   taskStates: Record<string, TaskStationState>;
+  pipeLockStates: Record<string, PipeLockState>;
+  disabledGenerators: Record<string, number>; // generatorId → expiresAt timestamp
+  shipOxygen: number; // 0-100, mutable from both game loop and socket handlers
 }
 
 export interface DoorState {
   isOpen: boolean;
   isLocked: boolean;
-  lockedBy: string | null; // socketId of the hacker who locked it
+  lockedBy: string | null; // socketId of the player who locked it
+  hackerLockExpiresAt: number; // 0 = normal lock (can be toggled), >0 = hacker lock (auto-expires at timestamp, unbreakable)
+  lockedAt: number; // timestamp when door was locked (for 15s unlock cooldown)
+}
+
+export interface PipeLockState {
+  isLocked: boolean;
+  lockedBy: string | null;
+  hackerLockExpiresAt: number; // 0 = normal lock, >0 = hacker lock (auto-expires at timestamp, unbreakable)
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -181,7 +192,10 @@ export interface TaskStationState {
 // Decorative Objects — cosmetic props in rooms (no interaction)
 // ═══════════════════════════════════════════════════════════════
 
-export type DecoType = 'boneco_desmontavel' | 'pop_it' | 'pelucia' | 'blocos_montar';
+export type DecoType =
+  | 'boneco_desmontavel' | 'pop_it' | 'pelucia' | 'blocos_montar'
+  | 'bookshelf' | 'book_stack'
+  | 'medical_bed' | 'iv_stand' | 'medicine_cabinet';
 
 export interface DecoObjectInfo {
   id: string;             // "deco_R_C_N"

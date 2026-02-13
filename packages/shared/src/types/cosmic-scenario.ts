@@ -16,13 +16,15 @@ export const CelestialBodyConfigSchema = z.object({
   dustCloudColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   coronaIntensity: z.number().min(0.5).max(3.0).optional(),
   dustCloudRadius: z.number().min(30).max(120).optional(),
+  // Mass for N-body gravitational simulation (relative, 0.5=light, 2.0=heavy)
+  mass: z.number().min(0.5).max(2.0).optional(),
 });
 
 export const CosmicPhaseSchema = z.object({
   startSec: z.number().min(0),
   endSec: z.number().min(1),
-  era: z.enum(['stable', 'chaosInferno', 'chaosIce']),
-  gravity: z.number().min(0.2).max(2.5),
+  era: z.enum(['stable', 'chaosInferno', 'chaosIce', 'chaosGravity']),
+  gravity: z.number().min(0.2).max(3.0),
   description: z.string().min(1).max(200),
 });
 
@@ -40,6 +42,8 @@ export const CosmicScenarioSchema = z.object({
   suns: z.tuple([CelestialBodyConfigSchema, CelestialBodyConfigSchema, CelestialBodyConfigSchema]),
   phases: z.array(CosmicPhaseSchema).min(4).max(12),
   starfield: StarfieldConfigSchema.optional(),
+  // Initial orbital configuration for N-body simulation
+  initialConfig: z.enum(['triangle', 'hierarchical', 'figure8']).optional(),
 });
 
 export type CelestialBodyConfig = z.infer<typeof CelestialBodyConfigSchema>;

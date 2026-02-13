@@ -2,12 +2,12 @@ import { useState, useMemo, useCallback } from 'react';
 import { useGameStore } from '../stores/game-store.js';
 import { useNetworkStore } from '../stores/network-store.js';
 import { playLightOn, playLightOff, playDoorLocked } from '../audio/sound-manager.js';
-import * as s from './styles.js';
 
 /**
  * HackerPanel — fullscreen overlay shown when the Hacker power is active.
- * Lists all rooms with their doors, lights, and dynamic walls.
- * The hacker can remotely lock/unlock doors, toggle lights, and raise/lower walls.
+ * Lists all rooms with their doors, lights, dynamic walls, pipes, and O2 generators.
+ * The hacker can remotely lock doors/pipes (40s unbreakable), toggle lights/walls,
+ * disable O2 generators, and drain ship oxygen.
  */
 
 const HACKER_GREEN = '#00ff88';
@@ -15,6 +15,31 @@ const HACKER_GREEN_DIM = '#00cc66';
 const HACKER_BG = 'rgba(0, 10, 5, 0.95)';
 const HACKER_CARD_BG = 'rgba(0, 20, 10, 0.8)';
 const HACKER_BORDER = 'rgba(0, 255, 136, 0.2)';
+
+const ROW_STYLE: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '6px 10px',
+  background: 'rgba(0, 40, 20, 0.5)',
+  borderRadius: 4,
+  border: `1px solid ${HACKER_BORDER}`,
+};
+
+function hackerBtn(bg: string, border: string, color: string, disabled = false): React.CSSProperties {
+  return {
+    background: bg,
+    border: `1px solid ${border}`,
+    borderRadius: 4,
+    color,
+    padding: '4px 12px',
+    fontSize: 11,
+    fontFamily: "'Courier New', monospace",
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontWeight: 700,
+    opacity: disabled ? 0.5 : 1,
+  };
+}
 
 export function HackerPanel() {
   const localPower = useGameStore((st) => st.localPower);
@@ -25,20 +50,20 @@ export function HackerPanel() {
   const hackerPanelOpen = useGameStore((st) => st.hackerPanelOpen);
   const [search, setSearch] = useState('');
   const [expandedRoom, setExpandedRoom] = useState<string | null>(null);
+  const [drainCount, setDrainCount] = useState(0);
 
   const isActive = localPower === 'hacker'
     && localPlayerId
     && players[localPlayerId]?.powerActive
     && hackerPanelOpen;
 
-  // Build room data with associated doors, lights, and dynamic walls
+  // Build room data with associated doors, lights, dynamic walls, pipes, generators
   const roomData = useMemo(() => {
     if (!mazeLayout || !mazeSnapshot) return [];
 
     // Map doors to rooms
     const doorsByRoom = new Map<string, typeof mazeLayout.doors>();
     for (const door of mazeLayout.doors) {
-      // Find which room this door belongs to
       const roomId = `room_${door.row}_${door.col}`;
       const room = mazeLayout.rooms.find(r => r.id === roomId);
       const targetRoomId = room ? roomId : findNeighborRoom(door, mazeLayout.rooms);
@@ -65,7 +90,6 @@ export function HackerPanel() {
       if (!wall) continue;
       const wallCenterX = (wall.start[0] + wall.end[0]) / 2;
       const wallCenterZ = (wall.start[1] + wall.end[1]) / 2;
-      // Find nearest room
       let nearestRoom = mazeLayout.rooms[0];
       let nearestDistSq = Infinity;
       for (const room of mazeLayout.rooms) {
@@ -77,11 +101,27 @@ export function HackerPanel() {
           nearestRoom = room;
         }
       }
-      if (nearestDistSq < 15 * 15) { // Only associate if within 15 units
+      if (nearestDistSq < 15 * 15) {
         const list = dynWallsByRoom.get(nearestRoom.id) ?? [];
         list.push(wallId);
         dynWallsByRoom.set(nearestRoom.id, list);
       }
+    }
+
+    // Map pipes to rooms
+    const pipesByRoom = new Map<string, typeof mazeLayout.pipeNodes>();
+    for (const pipe of (mazeLayout.pipeNodes ?? [])) {
+      const list = pipesByRoom.get(pipe.roomId) ?? [];
+      list.push(pipe);
+      pipesByRoom.set(pipe.roomId, list);
+    }
+
+    // Map generators to rooms
+    const gensByRoom = new Map<string, typeof mazeLayout.oxygenGenerators>();
+    for (const gen of (mazeLayout.oxygenGenerators ?? [])) {
+      const list = gensByRoom.get(gen.roomId) ?? [];
+      list.push(gen);
+      gensByRoom.set(gen.roomId, list);
     }
 
     return mazeLayout.rooms.map(room => ({
@@ -93,7 +133,9 @@ export function HackerPanel() {
       doors: doorsByRoom.get(room.id) ?? [],
       lights: lightsByRoom.get(room.id) ?? [],
       dynamicWalls: dynWallsByRoom.get(room.id) ?? [],
-    })).filter(r => r.doors.length > 0 || r.lights.length > 0 || r.dynamicWalls.length > 0);
+      pipes: pipesByRoom.get(room.id) ?? [],
+      generators: gensByRoom.get(room.id) ?? [],
+    })).filter(r => r.doors.length > 0 || r.lights.length > 0 || r.dynamicWalls.length > 0 || r.pipes.length > 0 || r.generators.length > 0);
   }, [mazeLayout, mazeSnapshot]);
 
   // Filter by search
@@ -103,15 +145,19 @@ export function HackerPanel() {
     return roomData.filter(r => r.name.toLowerCase().includes(q));
   }, [roomData, search]);
 
-  const handleHackerAction = useCallback((targetType: 'door' | 'light' | 'wall', targetId: string) => {
+  const handleHackerAction = useCallback((targetType: 'door' | 'light' | 'wall' | 'pipe' | 'oxygen_generator' | 'oxygen_drain', targetId: string) => {
     const socket = useNetworkStore.getState().socket;
     if (!socket) return;
 
     if (targetType === 'light') {
       const isOn = mazeSnapshot?.lightStates[targetId] !== false;
       if (isOn) playLightOff(); else playLightOn();
-    } else if (targetType === 'door') {
+    } else if (targetType === 'door' || targetType === 'pipe') {
       playDoorLocked();
+    }
+
+    if (targetType === 'oxygen_drain') {
+      setDrainCount(c => c + 1);
     }
 
     socket.emit('hacker:action', { targetType, targetId });
@@ -126,6 +172,8 @@ export function HackerPanel() {
   }, []);
 
   if (!isActive) return null;
+
+  const now = Date.now();
 
   return (
     <div
@@ -165,7 +213,7 @@ export function HackerPanel() {
             {'>'} SHIP CONTROL SYSTEM
           </div>
           <div style={{ fontSize: 11, color: HACKER_GREEN_DIM, marginTop: 2 }}>
-            Remote access to doors, lights and walls | [Q] or [ESC] to exit
+            Remote access to doors, pipes, lights, walls and oxygen | [Q] or [ESC] to exit
           </div>
         </div>
         <button
@@ -208,20 +256,41 @@ export function HackerPanel() {
         />
       </div>
 
-      {/* Stats bar */}
+      {/* Stats bar + O2 drain */}
       <div style={{
         padding: '0 24px 12px',
         display: 'flex',
-        gap: 24,
+        alignItems: 'center',
+        justifyContent: 'space-between',
         fontSize: 11,
         color: HACKER_GREEN_DIM,
         zIndex: 2,
         flexShrink: 0,
       }}>
-        <span>Rooms: {filteredRooms.length}</span>
-        <span>Doors: {filteredRooms.reduce((sum, r) => sum + r.doors.length, 0)}</span>
-        <span>Lights: {filteredRooms.reduce((sum, r) => sum + r.lights.length, 0)}</span>
-        <span>Walls: {filteredRooms.reduce((sum, r) => sum + r.dynamicWalls.length, 0)}</span>
+        <div style={{ display: 'flex', gap: 16 }}>
+          <span>Rooms: {filteredRooms.length}</span>
+          <span>Doors: {filteredRooms.reduce((sum, r) => sum + r.doors.length, 0)}</span>
+          <span>Pipes: {filteredRooms.reduce((sum, r) => sum + r.pipes.length, 0)}</span>
+          <span>Lights: {filteredRooms.reduce((sum, r) => sum + r.lights.length, 0)}</span>
+          <span>O2 Gens: {filteredRooms.reduce((sum, r) => sum + r.generators.length, 0)}</span>
+        </div>
+        <button
+          onClick={() => handleHackerAction('oxygen_drain', '')}
+          disabled={drainCount >= 2}
+          style={{
+            background: drainCount >= 2 ? 'rgba(100, 100, 100, 0.2)' : 'rgba(255, 0, 0, 0.2)',
+            border: `1px solid ${drainCount >= 2 ? '#666' : '#ff4444'}`,
+            borderRadius: 4,
+            color: drainCount >= 2 ? '#666' : '#ff4444',
+            padding: '4px 12px',
+            fontSize: 11,
+            fontFamily: "'Courier New', monospace",
+            cursor: drainCount >= 2 ? 'not-allowed' : 'pointer',
+            fontWeight: 700,
+          }}
+        >
+          DRAIN O2 -15% ({2 - drainCount} left)
+        </button>
       </div>
 
       {/* Room list */}
@@ -231,12 +300,7 @@ export function HackerPanel() {
         padding: '0 24px 24px',
         zIndex: 2,
       }}>
-        <style>{`
-          .hacker-scroll::-webkit-scrollbar { width: 6px; }
-          .hacker-scroll::-webkit-scrollbar-track { background: rgba(0,20,10,0.5); border-radius: 3px; }
-          .hacker-scroll::-webkit-scrollbar-thumb { background: ${HACKER_GREEN_DIM}; border-radius: 3px; }
-        `}</style>
-        <div className="hacker-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {filteredRooms.map((room) => {
             const isExpanded = expandedRoom === room.id;
             return (
@@ -276,6 +340,11 @@ export function HackerPanel() {
                         {'\uD83D\uDEAA'}{room.doors.length}
                       </span>
                     )}
+                    {room.pipes.length > 0 && (
+                      <span style={{ fontSize: 10, color: HACKER_GREEN_DIM }}>
+                        {'\u{1F6C1}'}{room.pipes.length}
+                      </span>
+                    )}
                     {room.lights.length > 0 && (
                       <span style={{ fontSize: 10, color: HACKER_GREEN_DIM }}>
                         {'\uD83D\uDCA1'}{room.lights.length}
@@ -284,6 +353,11 @@ export function HackerPanel() {
                     {room.dynamicWalls.length > 0 && (
                       <span style={{ fontSize: 10, color: HACKER_GREEN_DIM }}>
                         {'\u{1F9F1}'}{room.dynamicWalls.length}
+                      </span>
+                    )}
+                    {room.generators.length > 0 && (
+                      <span style={{ fontSize: 10, color: HACKER_GREEN_DIM }}>
+                        O2:{room.generators.length}
                       </span>
                     )}
                     <span style={{ fontSize: 12 }}>
@@ -300,45 +374,59 @@ export function HackerPanel() {
                       const doorState = mazeSnapshot.doorStates[door.id];
                       const isLocked = doorState?.isLocked ?? false;
                       const isOpen = doorState?.isOpen ?? false;
-                      const lockedByMe = doorState?.lockedBy === localPlayerId;
+                      const isHackerLocked = isLocked && (doorState?.hackerLockExpiresAt ?? 0) > now;
+                      const hackerSecs = isHackerLocked ? Math.ceil(((doorState?.hackerLockExpiresAt ?? 0) - now) / 1000) : 0;
 
                       return (
-                        <div key={door.id} style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '6px 10px',
-                          background: 'rgba(0, 40, 20, 0.5)',
-                          borderRadius: 4,
-                          border: `1px solid ${HACKER_BORDER}`,
-                        }}>
+                        <div key={door.id} style={ROW_STYLE}>
                           <div>
                             <span style={{ fontSize: 12, marginRight: 6 }}>{'\uD83D\uDEAA'}</span>
                             <span style={{ fontSize: 12 }}>Door {door.side}</span>
                             <span style={{ fontSize: 10, color: HACKER_GREEN_DIM, marginLeft: 8 }}>
-                              {isLocked ? (lockedByMe ? 'LOCKED (by you)' : 'LOCKED') : isOpen ? 'OPEN' : 'CLOSED'}
+                              {isHackerLocked ? `LOCKED (${hackerSecs}s)` : isLocked ? 'LOCKED' : isOpen ? 'OPEN' : 'CLOSED'}
                             </span>
                           </div>
                           <button
-                            onClick={() => handleHackerAction('door', door.id)}
-                            style={{
-                              background: isLocked && lockedByMe
-                                ? 'rgba(0, 255, 136, 0.2)'
-                                : isLocked
-                                ? 'rgba(255, 0, 0, 0.2)'
-                                : 'rgba(255, 136, 0, 0.2)',
-                              border: `1px solid ${isLocked && lockedByMe ? HACKER_GREEN : isLocked ? '#ff4444' : '#ff8800'}`,
-                              borderRadius: 4,
-                              color: isLocked && lockedByMe ? HACKER_GREEN : isLocked ? '#ff4444' : '#ff8800',
-                              padding: '4px 12px',
-                              fontSize: 11,
-                              fontFamily: "'Courier New', monospace",
-                              cursor: isLocked && !lockedByMe ? 'not-allowed' : 'pointer',
-                              fontWeight: 700,
-                              opacity: isLocked && !lockedByMe ? 0.5 : 1,
-                            }}
+                            onClick={() => !isLocked && handleHackerAction('door', door.id)}
+                            style={hackerBtn(
+                              isLocked ? 'rgba(255, 0, 0, 0.2)' : 'rgba(255, 136, 0, 0.2)',
+                              isLocked ? '#ff4444' : '#ff8800',
+                              isLocked ? '#ff4444' : '#ff8800',
+                              isLocked,
+                            )}
                           >
-                            {isLocked && lockedByMe ? 'UNLOCK' : isLocked ? 'LOCKED BY OTHER' : 'LOCK'}
+                            {isHackerLocked ? `LOCKED ${hackerSecs}s` : isLocked ? 'LOCKED' : 'LOCK 40s'}
+                          </button>
+                        </div>
+                      );
+                    })}
+
+                    {/* Pipes */}
+                    {room.pipes.map((pipe) => {
+                      const pipeLock = mazeSnapshot.pipeLockStates?.[pipe.id];
+                      const isLocked = pipeLock?.isLocked ?? false;
+                      const isHackerLocked = isLocked && (pipeLock?.hackerLockExpiresAt ?? 0) > now;
+                      const hackerSecs = isHackerLocked ? Math.ceil(((pipeLock?.hackerLockExpiresAt ?? 0) - now) / 1000) : 0;
+
+                      return (
+                        <div key={pipe.id} style={ROW_STYLE}>
+                          <div>
+                            <span style={{ fontSize: 12, marginRight: 6 }}>{'\u{1F6C1}'}</span>
+                            <span style={{ fontSize: 12 }}>Pipe</span>
+                            <span style={{ fontSize: 10, color: HACKER_GREEN_DIM, marginLeft: 8 }}>
+                              {isHackerLocked ? `LOCKED (${hackerSecs}s)` : isLocked ? 'LOCKED' : 'OPEN'}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => !isLocked && handleHackerAction('pipe', pipe.id)}
+                            style={hackerBtn(
+                              isLocked ? 'rgba(255, 0, 0, 0.2)' : 'rgba(0, 200, 255, 0.2)',
+                              isLocked ? '#ff4444' : '#00ccff',
+                              isLocked ? '#ff4444' : '#00ccff',
+                              isLocked,
+                            )}
+                          >
+                            {isHackerLocked ? `LOCKED ${hackerSecs}s` : isLocked ? 'LOCKED' : 'LOCK 40s'}
                           </button>
                         </div>
                       );
@@ -349,15 +437,7 @@ export function HackerPanel() {
                       const isOn = mazeSnapshot.lightStates[light.id] !== false;
 
                       return (
-                        <div key={light.id} style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '6px 10px',
-                          background: 'rgba(0, 40, 20, 0.5)',
-                          borderRadius: 4,
-                          border: `1px solid ${HACKER_BORDER}`,
-                        }}>
+                        <div key={light.id} style={ROW_STYLE}>
                           <div>
                             <span style={{ fontSize: 12, marginRight: 6 }}>{'\uD83D\uDCA1'}</span>
                             <span style={{ fontSize: 12 }}>Light</span>
@@ -367,17 +447,11 @@ export function HackerPanel() {
                           </div>
                           <button
                             onClick={() => handleHackerAction('light', light.id)}
-                            style={{
-                              background: isOn ? 'rgba(255, 200, 0, 0.2)' : 'rgba(100, 100, 100, 0.2)',
-                              border: `1px solid ${isOn ? '#ffdd44' : '#666'}`,
-                              borderRadius: 4,
-                              color: isOn ? '#ffdd44' : '#aaa',
-                              padding: '4px 12px',
-                              fontSize: 11,
-                              fontFamily: "'Courier New', monospace",
-                              cursor: 'pointer',
-                              fontWeight: 700,
-                            }}
+                            style={hackerBtn(
+                              isOn ? 'rgba(255, 200, 0, 0.2)' : 'rgba(100, 100, 100, 0.2)',
+                              isOn ? '#ffdd44' : '#666',
+                              isOn ? '#ffdd44' : '#aaa',
+                            )}
                           >
                             {isOn ? 'TURN OFF' : 'TURN ON'}
                           </button>
@@ -390,15 +464,7 @@ export function HackerPanel() {
                       const isClosed = mazeSnapshot.dynamicWallStates[wallId] !== false;
 
                       return (
-                        <div key={wallId} style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '6px 10px',
-                          background: 'rgba(0, 40, 20, 0.5)',
-                          borderRadius: 4,
-                          border: `1px solid ${HACKER_BORDER}`,
-                        }}>
+                        <div key={wallId} style={ROW_STYLE}>
                           <div>
                             <span style={{ fontSize: 12, marginRight: 6 }}>{'\u{1F9F1}'}</span>
                             <span style={{ fontSize: 12 }}>Wall</span>
@@ -408,19 +474,43 @@ export function HackerPanel() {
                           </div>
                           <button
                             onClick={() => handleHackerAction('wall', wallId)}
-                            style={{
-                              background: isClosed ? 'rgba(68, 255, 136, 0.2)' : 'rgba(255, 136, 68, 0.2)',
-                              border: `1px solid ${isClosed ? '#44ff88' : '#ff8844'}`,
-                              borderRadius: 4,
-                              color: isClosed ? '#44ff88' : '#ff8844',
-                              padding: '4px 12px',
-                              fontSize: 11,
-                              fontFamily: "'Courier New', monospace",
-                              cursor: 'pointer',
-                              fontWeight: 700,
-                            }}
+                            style={hackerBtn(
+                              isClosed ? 'rgba(68, 255, 136, 0.2)' : 'rgba(255, 136, 68, 0.2)',
+                              isClosed ? '#44ff88' : '#ff8844',
+                              isClosed ? '#44ff88' : '#ff8844',
+                            )}
                           >
                             {isClosed ? 'LOWER' : 'RAISE'}
+                          </button>
+                        </div>
+                      );
+                    })}
+
+                    {/* O2 Generators */}
+                    {room.generators.map((gen) => {
+                      const disabledUntil = mazeSnapshot.disabledGenerators?.[gen.id] ?? 0;
+                      const isDisabled = disabledUntil > now;
+                      const disabledSecs = isDisabled ? Math.ceil((disabledUntil - now) / 1000) : 0;
+
+                      return (
+                        <div key={gen.id} style={ROW_STYLE}>
+                          <div>
+                            <span style={{ fontSize: 12, marginRight: 6 }}>O2</span>
+                            <span style={{ fontSize: 12 }}>Generator</span>
+                            <span style={{ fontSize: 10, color: isDisabled ? '#ff4444' : '#44ff88', marginLeft: 8 }}>
+                              {isDisabled ? `DISABLED (${disabledSecs}s)` : 'ACTIVE'}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => !isDisabled && handleHackerAction('oxygen_generator', gen.id)}
+                            style={hackerBtn(
+                              isDisabled ? 'rgba(255, 0, 0, 0.2)' : 'rgba(255, 100, 0, 0.2)',
+                              isDisabled ? '#ff4444' : '#ff6600',
+                              isDisabled ? '#ff4444' : '#ff6600',
+                              isDisabled,
+                            )}
+                          >
+                            {isDisabled ? `DISABLED ${disabledSecs}s` : 'DISABLE 40s'}
                           </button>
                         </div>
                       );

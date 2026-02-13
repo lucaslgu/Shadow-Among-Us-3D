@@ -255,6 +255,12 @@ const ROOM_TASK_MAP: Record<string, TaskType> = {
 
 const DECO_TYPES: DecoType[] = ['boneco_desmontavel', 'pop_it', 'pelucia', 'blocos_montar'];
 
+// Room-specific decorations — themed rooms get their own deco types instead of generic toys
+const ROOM_DECO_MAP: Record<string, { types: DecoType[]; count: [number, number] }> = {
+  'Library': { types: ['bookshelf', 'book_stack'], count: [2, 3] },        // 2-3 decos
+  'Infirmary': { types: ['medical_bed', 'iv_stand', 'medicine_cabinet'], count: [2, 3] },
+};
+
 export function generateMaze(seed: number, playerCount: number = 4): MazeLayout {
   const rng = mulberry32(seed);
   const totalCells = GRID_SIZE * GRID_SIZE;
@@ -764,11 +770,15 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
     });
   }
 
-  // ── Build decorative objects (0-2 per room) ──
+  // ── Build decorative objects (0-2 per room, themed rooms get more) ──
   const decorations: DecoObjectInfo[] = [];
   let decoIdx = 0;
   for (const room of rooms) {
-    const decoCount = Math.floor(rng() * 3); // 0, 1, or 2
+    const themed = ROOM_DECO_MAP[room.name];
+    const decoCount = themed
+      ? themed.count[0] + Math.floor(rng() * (themed.count[1] - themed.count[0] + 1))
+      : Math.floor(rng() * 3); // 0, 1, or 2
+    const decoPool = themed ? themed.types : DECO_TYPES;
     for (let d = 0; d < decoCount; d++) {
       const angle = rng() * Math.PI * 2;
       const dist = 1 + rng() * 2;
@@ -780,8 +790,8 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
           0,
           room.position[2] + Math.sin(angle) * dist,
         ],
-        decoType: DECO_TYPES[Math.floor(rng() * DECO_TYPES.length)],
-        scale: 0.5 + rng(),
+        decoType: decoPool[Math.floor(rng() * decoPool.length)],
+        scale: themed ? 0.8 + rng() * 0.4 : 0.5 + rng(),
         rotationY: rng() * Math.PI * 2,
       });
     }
@@ -830,67 +840,101 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
     };
   });
 
-  // ── Build underground pipe network (6-8 nodes spread across the maze) ──
-  const PIPE_NODE_COUNT = Math.min(8, Math.max(6, Math.floor(rooms.length * 0.05)));
-  // Select rooms spread across the maze using grid sectors
-  const SECTORS = 3; // 3x3 sector grid
-  const sectorSize = GRID_SIZE / SECTORS;
-  const sectorRooms = new Map<string, typeof rooms>();
-  for (const room of rooms) {
-    const sr = Math.floor(room.row / sectorSize);
-    const sc = Math.floor(room.col / sectorSize);
-    const key = `${sr}_${sc}`;
-    const list = sectorRooms.get(key) ?? [];
-    list.push(room);
-    sectorRooms.set(key, list);
-  }
-  // Pick one room per sector first, then fill with random rooms
-  const pipeRoomCandidates: MazeRoomInfo[] = [];
-  const usedRoomIds = new Set<string>();
-  for (const [, sectorList] of sectorRooms) {
-    const shuffledSector = shuffle([...sectorList], rng);
-    if (shuffledSector.length > 0 && pipeRoomCandidates.length < PIPE_NODE_COUNT) {
-      pipeRoomCandidates.push(shuffledSector[0]);
-      usedRoomIds.add(shuffledSector[0].id);
-    }
-  }
-  // Fill remaining slots
-  const remainingRooms = shuffle([...rooms], rng).filter(r => !usedRoomIds.has(r.id));
-  while (pipeRoomCandidates.length < PIPE_NODE_COUNT && remainingRooms.length > 0) {
-    pipeRoomCandidates.push(remainingRooms.shift()!);
-  }
+  // ── Build underground pipe network (one node per room) ──
+  const pipeRoomCandidates: MazeRoomInfo[] = rooms;
 
-  // Underground layout: compact grid at Y=-10, scaled down to ~40% of surface
+  // Underground layout: at Y=-10, same XZ scale as surface
   const UNDERGROUND_Y = -10;
-  const UNDERGROUND_SCALE = 0.4;
-  const pipeNodes: PipeNode[] = pipeRoomCandidates.map(room => ({
-    id: `pipe_${room.row}_${room.col}`,
-    roomId: room.id,
-    roomName: room.name,
-    surfacePosition: [room.position[0], 0, room.position[2]] as [number, number, number],
-    undergroundPosition: [
-      room.position[0] * UNDERGROUND_SCALE,
-      UNDERGROUND_Y,
-      room.position[2] * UNDERGROUND_SCALE,
-    ] as [number, number, number],
-  }));
+  const UNDERGROUND_SCALE = 1.0;
+  // Position pipe entries at the CORNER opposite the door (far from the entrance)
+  const WALL_MARGIN = 1.5; // distance from wall to manhole center
+  const HALF_CELL = CELL_SIZE / 2;
+  const doorLookup = new Map<string, DoorInfo>();
+  for (const d of doors) doorLookup.set(d.id, d);
 
-  // Connect nodes with a spanning tree (MST by distance) + 2 extra edges
+  const pipeNodes: PipeNode[] = pipeRoomCandidates.map(room => {
+    const cell = cells[room.row * GRID_SIZE + room.col];
+    const rx = room.position[0];
+    const rz = room.position[2];
+    const edge = HALF_CELL - WALL_MARGIN;
+
+    // Determine door side from the room's assigned door
+    let doorSide: 'N' | 'S' | 'E' | 'W' | null = null;
+    if (room.doorId) {
+      const doorInfo = doorLookup.get(room.doorId);
+      if (doorInfo) doorSide = doorInfo.side;
+    }
+
+    // Fallback: detect the opening from cell walls
+    if (!doorSide) {
+      if (!cell.wallNorth) doorSide = 'N';
+      else if (!cell.wallSouth) doorSide = 'S';
+      else if (!cell.wallEast) doorSide = 'E';
+      else if (!cell.wallWest) doorSide = 'W';
+    }
+
+    // Place pipe at the corner opposite the door
+    // Deterministic left/right pick via room row+col hash
+    const cornerSign = ((room.row + room.col) % 2 === 0) ? 1 : -1;
+    let sx = rx;
+    let sz = rz;
+
+    switch (doorSide) {
+      case 'N': // door on Z- side → pipe at Z+ corner
+        sz = rz + edge;
+        sx = rx + cornerSign * edge;
+        break;
+      case 'S': // door on Z+ side → pipe at Z- corner
+        sz = rz - edge;
+        sx = rx + cornerSign * edge;
+        break;
+      case 'E': // door on X+ side → pipe at X- corner
+        sx = rx - edge;
+        sz = rz + cornerSign * edge;
+        break;
+      case 'W': // door on X- side → pipe at X+ corner
+        sx = rx + edge;
+        sz = rz + cornerSign * edge;
+        break;
+      default: // no door found — fallback to south-east corner
+        sx = rx + edge;
+        sz = rz + edge;
+        break;
+    }
+
+    return {
+      id: `pipe_${room.row}_${room.col}`,
+      roomId: room.id,
+      roomName: room.name,
+      surfacePosition: [sx, 0, sz] as [number, number, number],
+      undergroundPosition: [
+        rx * UNDERGROUND_SCALE,
+        UNDERGROUND_Y,
+        rz * UNDERGROUND_SCALE,
+      ] as [number, number, number],
+    };
+  });
+
+  // Connect nodes with MST + ~10% extra short edges for loops
   const pipeConnections: PipeConnection[] = [];
   if (pipeNodes.length >= 2) {
     const pipeUf = new UnionFind(pipeNodes.length);
-    // Build all edges sorted by underground distance
+    // Only consider edges between nearby rooms (within ~3 cells underground) to keep O(n) per node
+    const MAX_EDGE_DIST = CELL_SIZE * UNDERGROUND_SCALE * 3.5;
     const pipeEdges: Array<{ i: number; j: number; dist: number }> = [];
     for (let i = 0; i < pipeNodes.length; i++) {
       for (let j = i + 1; j < pipeNodes.length; j++) {
         const dx = pipeNodes[i].undergroundPosition[0] - pipeNodes[j].undergroundPosition[0];
         const dz = pipeNodes[i].undergroundPosition[2] - pipeNodes[j].undergroundPosition[2];
-        pipeEdges.push({ i, j, dist: Math.sqrt(dx * dx + dz * dz) });
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < MAX_EDGE_DIST) {
+          pipeEdges.push({ i, j, dist });
+        }
       }
     }
     pipeEdges.sort((a, b) => a.dist - b.dist);
 
-    // Spanning tree
+    // Spanning tree (MST)
     const extraEdges: typeof pipeEdges = [];
     for (const edge of pipeEdges) {
       if (pipeUf.union(edge.i, edge.j)) {
@@ -899,8 +943,34 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
         extraEdges.push(edge);
       }
     }
-    // Add 2 extra connections for loops
-    for (let i = 0; i < Math.min(2, extraEdges.length); i++) {
+
+    // If some nodes are unreachable with short edges, add longer edges
+    const unreached: number[] = [];
+    for (let i = 0; i < pipeNodes.length; i++) {
+      if (pipeUf.find(i) !== pipeUf.find(0)) unreached.push(i);
+    }
+    if (unreached.length > 0) {
+      // Build long edges only for unreached nodes
+      const longEdges: Array<{ i: number; j: number; dist: number }> = [];
+      for (const u of unreached) {
+        for (let j = 0; j < pipeNodes.length; j++) {
+          if (pipeUf.find(u) === pipeUf.find(j)) continue;
+          const dx = pipeNodes[u].undergroundPosition[0] - pipeNodes[j].undergroundPosition[0];
+          const dz = pipeNodes[u].undergroundPosition[2] - pipeNodes[j].undergroundPosition[2];
+          longEdges.push({ i: u, j, dist: Math.sqrt(dx * dx + dz * dz) });
+        }
+      }
+      longEdges.sort((a, b) => a.dist - b.dist);
+      for (const edge of longEdges) {
+        if (pipeUf.union(edge.i, edge.j)) {
+          pipeConnections.push({ nodeA: pipeNodes[edge.i].id, nodeB: pipeNodes[edge.j].id });
+        }
+      }
+    }
+
+    // Add ~10% extra short connections for alternative routes
+    const extraCount = Math.min(Math.ceil(pipeNodes.length * 0.1), extraEdges.length);
+    for (let i = 0; i < extraCount; i++) {
       pipeConnections.push({ nodeA: pipeNodes[extraEdges[i].i].id, nodeB: pipeNodes[extraEdges[i].j].id });
     }
   }
@@ -939,8 +1009,8 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
 // Underground pipe tunnel wall generation (collision boundaries)
 // ═══════════════════════════════════════════════════════════════
 
-const PIPE_TUNNEL_RADIUS = 1.8;
-const PIPE_CHAMBER_RADIUS = 2.5;
+const PIPE_TUNNEL_RADIUS = 3.0;
+const PIPE_CHAMBER_RADIUS = 3.5;
 
 function generatePipeWalls(nodes: PipeNode[], connections: PipeConnection[]): PipeWall[] {
   if (nodes.length === 0) return [];
@@ -1006,22 +1076,22 @@ function generatePipeWalls(nodes: PipeNode[], connections: PipeConnection[]): Pi
       const curr = conns[i];
       const next = conns[(i + 1) % conns.length];
 
-      // Right edge of current tunnel opening at chamber boundary
-      // Perpendicular right = (dirZ, -dirX)
-      const currRightX = nx + curr.dirX * CR + curr.dirZ * R;
-      const currRightZ = nz + curr.dirZ * CR - curr.dirX * R;
-
-      // Left edge of next tunnel opening at chamber boundary
+      // Left edge of current tunnel opening at chamber boundary
       // Perpendicular left = (-dirZ, dirX)
-      const nextLeftX = nx + next.dirX * CR - next.dirZ * R;
-      const nextLeftZ = nz + next.dirZ * CR + next.dirX * R;
+      const currLeftX = nx + curr.dirX * CR - curr.dirZ * R;
+      const currLeftZ = nz + curr.dirZ * CR + curr.dirX * R;
+
+      // Right edge of next tunnel opening at chamber boundary
+      // Perpendicular right = (dirZ, -dirX)
+      const nextRightX = nx + next.dirX * CR + next.dirZ * R;
+      const nextRightZ = nz + next.dirZ * CR - next.dirX * R;
 
       // Calculate angular gap between the two edges
-      const edgeAngleCurr = Math.atan2(currRightZ - nz, currRightX - nx);
-      const edgeAngleNext = Math.atan2(nextLeftZ - nz, nextLeftX - nx);
+      const edgeAngleStart = Math.atan2(currLeftZ - nz, currLeftX - nx);
+      const edgeAngleEnd = Math.atan2(nextRightZ - nz, nextRightX - nx);
 
-      // Determine the angular sweep (going counter-clockwise from curr to next)
-      let sweep = edgeAngleNext - edgeAngleCurr;
+      // Determine the angular sweep (going counter-clockwise from left of curr to right of next)
+      let sweep = edgeAngleEnd - edgeAngleStart;
       if (sweep < 0) sweep += Math.PI * 2;
 
       // If sweep is very small, just one wall segment suffices
@@ -1029,12 +1099,12 @@ function generatePipeWalls(nodes: PipeNode[], connections: PipeConnection[]): Pi
 
       // Create arc wall segments (approximate with line segments)
       const arcSegments = Math.max(1, Math.ceil(sweep / (Math.PI / 4))); // ~45° per segment
-      let prevX = currRightX, prevZ = currRightZ;
+      let prevX = currLeftX, prevZ = currLeftZ;
       for (let s = 1; s <= arcSegments; s++) {
         const t = s / arcSegments;
-        const angle = edgeAngleCurr + sweep * t;
-        const ptX = s === arcSegments ? nextLeftX : nx + Math.cos(angle) * CR;
-        const ptZ = s === arcSegments ? nextLeftZ : nz + Math.sin(angle) * CR;
+        const angle = edgeAngleStart + sweep * t;
+        const ptX = s === arcSegments ? nextRightX : nx + Math.cos(angle) * CR;
+        const ptZ = s === arcSegments ? nextRightZ : nz + Math.sin(angle) * CR;
         walls.push({ start: [prevX, prevZ], end: [ptX, ptZ] });
         prevX = ptX;
         prevZ = ptZ;
@@ -1049,7 +1119,7 @@ function generatePipeWalls(nodes: PipeNode[], connections: PipeConnection[]): Pi
 // Initialize mutable maze state (all doors closed/unlocked, lights on)
 // ═══════════════════════════════════════════════════════════════
 
-import type { MazeSnapshot, DoorState, TaskStationState } from './maze-types.js';
+import type { MazeSnapshot, DoorState, PipeLockState, TaskStationState } from './maze-types.js';
 
 export function createInitialMazeSnapshot(layout: MazeLayout): MazeSnapshot {
   const doorStates: Record<string, DoorState> = {};
@@ -1058,6 +1128,8 @@ export function createInitialMazeSnapshot(layout: MazeLayout): MazeSnapshot {
       isOpen: false,
       isLocked: false,
       lockedBy: null,
+      hackerLockExpiresAt: 0,
+      lockedAt: 0,
     };
   }
 
@@ -1080,5 +1152,14 @@ export function createInitialMazeSnapshot(layout: MazeLayout): MazeSnapshot {
     };
   }
 
-  return { doorStates, lightStates, dynamicWallStates, muralhaWalls: [], taskStates };
+  const pipeLockStates: Record<string, PipeLockState> = {};
+  for (const pipe of (layout.pipeNodes ?? [])) {
+    pipeLockStates[pipe.id] = {
+      isLocked: false,
+      lockedBy: null,
+      hackerLockExpiresAt: 0,
+    };
+  }
+
+  return { doorStates, lightStates, dynamicWallStates, muralhaWalls: [], taskStates, pipeLockStates, disabledGenerators: {}, shipOxygen: 100 };
 }

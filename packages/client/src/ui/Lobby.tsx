@@ -43,7 +43,9 @@ export function Lobby() {
   const me = lobbyPlayers.find((p) => p.id === playerId);
   const isHost = me?.isHost ?? false;
   const myReady = playerId ? (readyStates[playerId] ?? false) : false;
-  const allReady = lobbyPlayers.length >= 2 && lobbyPlayers.every((p) => readyStates[p.id]);
+  const isDev = import.meta.env.DEV;
+  const minPlayers = isDev ? 1 : 2;
+  const allReady = lobbyPlayers.length >= minPlayers && lobbyPlayers.every((p) => readyStates[p.id]);
 
   return (
     <div style={{ ...s.overlay, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'flex-start', gap: 16, padding: '24px 16px' }}>
@@ -298,8 +300,8 @@ export function Lobby() {
             onClick={() => allReady && startGame()}
             disabled={!allReady}
           >
-            {lobbyPlayers.length < 2
-              ? 'Need at least 2 players'
+            {lobbyPlayers.length < minPlayers
+              ? `Need at least ${minPlayers} player${minPlayers > 1 ? 's' : ''}`
               : allReady
                 ? 'Start Game'
                 : 'Waiting for all players to ready up...'}

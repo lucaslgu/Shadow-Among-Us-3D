@@ -79,7 +79,7 @@ export function AstronautModel({ data }: AstronautModelProps) {
     cloned.traverse((o: THREE.Object3D) => {
       if ((o as THREE.Mesh).isMesh) {
         const m = o as THREE.Mesh;
-        m.castShadow = true;
+        m.castShadow = false;
         m.receiveShadow = true;
         if (m.material instanceof THREE.MeshStandardMaterial) {
           const mat = m.material.clone();

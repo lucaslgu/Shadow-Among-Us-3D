@@ -78,8 +78,8 @@ export const POWER_CONFIGS: Record<PowerType, PowerConfig> = {
   [PowerType.HACKER]: {
     type: PowerType.HACKER,
     displayName: 'Hacker',
-    description: 'Access security cameras and lock doors remotely.',
-    duration: 20000,
+    description: 'Go invisible and remotely control doors, pipes, lights and oxygen for 45 seconds.',
+    duration: 45000,
     cooldown: 22000,
     usesPerMatch: 1,
     requiresTarget: false,
@@ -98,8 +98,8 @@ export const POWER_CONFIGS: Record<PowerType, PowerConfig> = {
   [PowerType.MURALHA]: {
     type: PowerType.MURALHA,
     displayName: 'Rampart',
-    description: 'Create up to 4 cement walls where you aim. Each wall blocks movement for 30 seconds. Charges recharge after cooldown.',
-    duration: 30000,
+    description: 'Create up to 4 cement walls where you aim. Each wall blocks movement for 60 seconds. Charges recharge after cooldown.',
+    duration: 60000,
     cooldown: 20000,
     usesPerMatch: 4,
     requiresTarget: false,
