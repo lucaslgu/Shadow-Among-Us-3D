@@ -111,7 +111,7 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
   connect: () => {
     if (get().socket) return;
 
-    const serverUrl = import.meta.env.VITE_SERVER_URL || 'http://localhost:3001';
+    const serverUrl = import.meta.env.VITE_SERVER_URL || '';
     const socket: Socket<ServerEvents, ClientEvents> = io(serverUrl, {
       transports: ['websocket'],
       autoConnect: true,
