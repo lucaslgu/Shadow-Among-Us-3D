@@ -1,0 +1,830 @@
+import type { MazeCell, MazeLayout, WallSegment, DoorInfo, LightInfo, MazeRoomInfo, TaskStationInfo, TaskType, DecoObjectInfo, DecoType, ShelterZone, OxygenGeneratorInfo } from './maze-types.js';
+import { TASK_REGISTRY, TASK_TYPES_BY_DIFFICULTY } from './task-registry.js';
+
+// ═══════════════════════════════════════════════════════════════
+// Deterministic PRNG (mulberry32)
+// ═══════════════════════════════════════════════════════════════
+
+function mulberry32(seed: number): () => number {
+  let s = seed | 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Seeded shuffle (Fisher-Yates)
+function shuffle<T>(arr: T[], rng: () => number): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Union-Find for Kruskal's algorithm
+// ═══════════════════════════════════════════════════════════════
+
+class UnionFind {
+  private parent: number[];
+  private rank: number[];
+
+  constructor(size: number) {
+    this.parent = Array.from({ length: size }, (_, i) => i);
+    this.rank = new Array(size).fill(0);
+  }
+
+  find(x: number): number {
+    if (this.parent[x] !== x) {
+      this.parent[x] = this.find(this.parent[x]);
+    }
+    return this.parent[x];
+  }
+
+  union(a: number, b: number): boolean {
+    const ra = this.find(a);
+    const rb = this.find(b);
+    if (ra === rb) return false;
+    if (this.rank[ra] < this.rank[rb]) {
+      this.parent[ra] = rb;
+    } else if (this.rank[ra] > this.rank[rb]) {
+      this.parent[rb] = ra;
+    } else {
+      this.parent[rb] = ra;
+      this.rank[ra]++;
+    }
+    return true;
+  }
+
+  connected(a: number, b: number): boolean {
+    return this.find(a) === this.find(b);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Maze edge representation
+// ═══════════════════════════════════════════════════════════════
+
+interface Edge {
+  cellA: number; // flat index of cell A (row * gridSize + col)
+  cellB: number; // flat index of cell B
+  row: number; // row of cellA
+  col: number; // col of cellA
+  side: 'S' | 'E'; // only S (south) and E (east) to avoid duplicates
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Cell-to-world coordinate helpers
+// ═══════════════════════════════════════════════════════════════
+
+function cellToWorld(
+  row: number,
+  col: number,
+  gridSize: number,
+  cellSize: number,
+): { minX: number; maxX: number; minZ: number; maxZ: number; centerX: number; centerZ: number } {
+  const halfMap = (gridSize * cellSize) / 2;
+  const minX = col * cellSize - halfMap;
+  const maxX = (col + 1) * cellSize - halfMap;
+  const minZ = row * cellSize - halfMap;
+  const maxZ = (row + 1) * cellSize - halfMap;
+  return {
+    minX,
+    maxX,
+    minZ,
+    maxZ,
+    centerX: (minX + maxX) / 2,
+    centerZ: (minZ + maxZ) / 2,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Wall count helper
+// ═══════════════════════════════════════════════════════════════
+
+function countWalls(cell: MazeCell): number {
+  return (cell.wallNorth ? 1 : 0) + (cell.wallSouth ? 1 : 0) +
+         (cell.wallEast ? 1 : 0) + (cell.wallWest ? 1 : 0);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Main generator
+// ═══════════════════════════════════════════════════════════════
+
+export const GRID_SIZE = 18;
+export const CELL_SIZE = 10;
+export const MAP_HALF_EXTENT = (GRID_SIZE * CELL_SIZE) / 2; // 90
+const WALL_KEEP_RATIO = 0.55; // keep ~55% of internal walls — more walls = more rooms
+const DYNAMIC_RATIO = 0.25;   // 25% of non-door internal walls are dynamic
+const DOOR_WIDTH = 2.5;       // must match DOOR_GAP in MazeRenderer
+
+// Themed room name pool (shuffled per seed, assigned in order)
+const ROOM_NAME_POOL = [
+  // Core station rooms
+  'Reator', 'Laboratório', 'Enfermaria', 'Armeiro', 'Comunicações',
+  'Controle', 'Arquivo', 'Gerador', 'Refeitório', 'Observatório',
+  'Depósito', 'Câmara Fria', 'Máquinas', 'Oficina', 'Terminal',
+  'Quarentena', 'Centro Médico', 'Almoxarifado', 'Segurança', 'Estufa',
+  'Servidor', 'Dormitório', 'Descontaminação', 'Ala Norte',
+  'Ala Sul', 'Setor Alfa', 'Setor Beta', 'Reuniões', 'Hangar', 'Criogenia',
+  // Engineering & utility
+  'Propulsão', 'Navegação', 'Ponte', 'Arsenal', 'Hidroponia',
+  'Reciclagem', 'Oxigênio', 'Escotilha', 'Câmara Ar', 'Módulo Hab.',
+  'Terraço', 'Convés', 'Baia Médica', 'Garagem', 'Silo',
+  'Estúdio', 'Biblioteca', 'Câmara Escura', 'Fornalha', 'Doca',
+  'Ala Leste', 'Ala Oeste', 'Setor Gama', 'Setor Delta', 'Subestação',
+  'Antena', 'Radar', 'Capsuleiro', 'Refúgio', 'Incinerador',
+  'Blindagem', 'Caldeira', 'Extração', 'Compressor', 'Destilaria',
+  // Extended wings
+  'Setor Épsilon', 'Setor Zeta', 'Setor Eta', 'Setor Theta',
+  'Ala Central', 'Ala Superior', 'Ala Inferior', 'Ala Externa',
+  'Turbina', 'Fusão', 'Ventilação', 'Filtros', 'Coleta',
+  'Fundição', 'Montagem', 'Esteira', 'Prensa', 'Solda',
+  'Acoplamento', 'Carga', 'Descarga', 'Armazém', 'Cofre',
+  'Passarela', 'Mirante', 'Vigília', 'Farol', 'Sentinela',
+  'Cisterna', 'Aqueduto', 'Câmara Térmica', 'Painel Solar', 'Bateria',
+  'Zona Zero', 'Protótipo', 'Teste', 'Simulador', 'Holodeck',
+  'Biotério', 'Viveiro', 'Herbário', 'Aquário', 'Sementeira',
+  'Enfermaria B', 'Lab. Químico', 'Lab. Físico', 'Lab. Bio',
+  'Depósito B', 'Terminal B', 'Corredor 7', 'Corredor 12',
+  'Módulo Ext.', 'Cabine', 'Cápsula', 'Berçário', 'Estoque',
+];
+
+// Room name → task type mapping (thematic)
+const ROOM_TASK_MAP: Record<string, TaskType> = {
+  // scanner_bioidentificacao
+  'Enfermaria': 'scanner_bioidentificacao',
+  'Centro Médico': 'scanner_bioidentificacao',
+  'Quarentena': 'scanner_bioidentificacao',
+  'Descontaminação': 'scanner_bioidentificacao',
+  'Baia Médica': 'scanner_bioidentificacao',
+  // esvaziar_lixo
+  'Refeitório': 'esvaziar_lixo',
+  'Depósito': 'esvaziar_lixo',
+  'Almoxarifado': 'esvaziar_lixo',
+  'Câmara Fria': 'esvaziar_lixo',
+  'Reciclagem': 'esvaziar_lixo',
+  'Incinerador': 'esvaziar_lixo',
+  // painel_energia
+  'Gerador': 'painel_energia',
+  'Subestação': 'painel_energia',
+  'Caldeira': 'painel_energia',
+  'Painel Solar': 'painel_energia',
+  'Bateria': 'painel_energia',
+  // canhao_asteroides
+  'Armeiro': 'canhao_asteroides',
+  'Hangar': 'canhao_asteroides',
+  // leitor_cartao
+  'Arquivo': 'leitor_cartao',
+  'Controle': 'leitor_cartao',
+  'Segurança': 'leitor_cartao',
+  'Reuniões': 'leitor_cartao',
+  'Navegação': 'leitor_cartao',
+  // motores
+  'Máquinas': 'motores',
+  'Oficina': 'motores',
+  'Criogenia': 'motores',
+  // amostra_sangue
+  'Biotério': 'amostra_sangue',
+  'Enfermaria B': 'amostra_sangue',
+  // limpar_filtro
+  'Filtros': 'limpar_filtro',
+  'Ventilação': 'limpar_filtro',
+  // registrar_temperatura
+  'Câmara Térmica': 'registrar_temperatura',
+  // alinhar_antena
+  'Farol': 'alinhar_antena',
+  'Sentinela': 'alinhar_antena',
+  // verificar_oxigenio
+  'Oxigênio': 'verificar_oxigenio',
+  // enviar_relatorio
+  'Ponte': 'enviar_relatorio',
+  'Comunicações': 'enviar_relatorio',
+  // inspecionar_traje
+  'Dormitório': 'inspecionar_traje',
+  'Cabine': 'inspecionar_traje',
+  // etiquetar_carga
+  'Carga': 'etiquetar_carga',
+  'Descarga': 'etiquetar_carga',
+  'Armazém': 'etiquetar_carga',
+  // calibrar_bussola
+  'Observatório': 'calibrar_bussola',
+  // soldar_circuito
+  'Solda': 'soldar_circuito',
+  'Montagem': 'soldar_circuito',
+  // consertar_tubulacao
+  'Cisterna': 'consertar_tubulacao',
+  'Aqueduto': 'consertar_tubulacao',
+  'Hidroponia': 'consertar_tubulacao',
+  // decodificar_mensagem
+  'Biblioteca': 'decodificar_mensagem',
+  'Terminal B': 'decodificar_mensagem',
+  // reabastecer_combustivel
+  'Propulsão': 'reabastecer_combustivel',
+  // classificar_minerais
+  'Fundição': 'classificar_minerais',
+  'Coleta': 'classificar_minerais',
+  // ajustar_frequencia
+  'Radar': 'ajustar_frequencia',
+  // reconectar_fios
+  'Lab. Químico': 'reconectar_fios',
+  'Laboratório': 'reconectar_fios',
+  // analisar_dados
+  'Esteira': 'analisar_dados',
+  // equilibrar_carga
+  'Prensa': 'equilibrar_carga',
+  // desativar_bomba
+  'Arsenal': 'desativar_bomba',
+  'Blindagem': 'desativar_bomba',
+  // navegar_asteroide
+  'Mirante': 'navegar_asteroide',
+  'Vigília': 'navegar_asteroide',
+  // reparar_reator
+  'Reator': 'reparar_reator',
+  'Fusão': 'reparar_reator',
+  // hackear_terminal
+  'Servidor': 'hackear_terminal',
+  'Protótipo': 'hackear_terminal',
+  // sincronizar_motores
+  'Turbina': 'sincronizar_motores',
+  'Compressor': 'sincronizar_motores',
+};
+
+const DECO_TYPES: DecoType[] = ['boneco_desmontavel', 'pop_it', 'pelucia', 'blocos_montar'];
+
+export function generateMaze(seed: number, playerCount: number = 4): MazeLayout {
+  const rng = mulberry32(seed);
+  const totalCells = GRID_SIZE * GRID_SIZE;
+
+  // Initialize all cells with all walls
+  const cells: MazeCell[] = [];
+  for (let row = 0; row < GRID_SIZE; row++) {
+    for (let col = 0; col < GRID_SIZE; col++) {
+      cells.push({
+        row,
+        col,
+        wallNorth: true,
+        wallSouth: true,
+        wallEast: true,
+        wallWest: true,
+      });
+    }
+  }
+
+  // Build list of internal edges (only S and E to avoid duplicates)
+  const edges: Edge[] = [];
+  for (let row = 0; row < GRID_SIZE; row++) {
+    for (let col = 0; col < GRID_SIZE; col++) {
+      const idx = row * GRID_SIZE + col;
+      // South edge (connects to row+1)
+      if (row < GRID_SIZE - 1) {
+        edges.push({
+          cellA: idx,
+          cellB: (row + 1) * GRID_SIZE + col,
+          row,
+          col,
+          side: 'S',
+        });
+      }
+      // East edge (connects to col+1)
+      if (col < GRID_SIZE - 1) {
+        edges.push({
+          cellA: idx,
+          cellB: row * GRID_SIZE + (col + 1),
+          row,
+          col,
+          side: 'E',
+        });
+      }
+    }
+  }
+
+  // Shuffle edges
+  shuffle(edges, rng);
+
+  // Kruskal's: remove edges to create spanning tree (ensures connectivity)
+  const uf = new UnionFind(totalCells);
+  const removedEdges = new Set<number>(); // indices of edges removed
+
+  for (let i = 0; i < edges.length; i++) {
+    const e = edges[i];
+    if (uf.union(e.cellA, e.cellB)) {
+      removedEdges.add(i);
+    }
+  }
+
+  // Remove additional edges beyond the spanning tree to create more open space
+  const keptEdgeIndices: number[] = [];
+  for (let i = 0; i < edges.length; i++) {
+    if (!removedEdges.has(i)) {
+      keptEdgeIndices.push(i);
+    }
+  }
+  shuffle(keptEdgeIndices, rng);
+
+  // Remove extra edges until we reach the desired wall-keep ratio
+  const targetKeptWalls = Math.floor(edges.length * WALL_KEEP_RATIO);
+  const currentKeptWalls = keptEdgeIndices.length;
+  const extraToRemove = Math.max(0, currentKeptWalls - targetKeptWalls);
+
+  for (let i = 0; i < extraToRemove && i < keptEdgeIndices.length; i++) {
+    removedEdges.add(keptEdgeIndices[i]);
+  }
+
+  // Apply removed edges to cells
+  for (const idx of removedEdges) {
+    const e = edges[idx];
+    const cellA = cells[e.cellA];
+    const cellB = cells[e.cellB];
+    if (e.side === 'S') {
+      cellA.wallSouth = false;
+      cellB.wallNorth = false;
+    } else {
+      cellA.wallEast = false;
+      cellB.wallWest = false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // Identify room cells (3+ walls) and create forced door edges
+  // Rooms = cells enclosed by 4 walls. Cells with 3 walls get
+  // their missing wall restored (with a door). Cells with <3 walls
+  // are corridors — no lights, no doors.
+  // ═══════════════════════════════════════════════════════════════
+
+  // Canonical door edge keys: "row_col_S" or "row_col_E"
+  const forcedDoorEdges = new Set<string>();
+  const roomCells = new Set<number>(); // flat indices of room cells
+
+  // Step 1: Snapshot — identify room candidates BEFORE any restoration
+  const roomCandidates: { idx: number; row: number; col: number; openSide: 'N' | 'S' | 'E' | 'W' }[] = [];
+
+  for (let row = 0; row < GRID_SIZE; row++) {
+    for (let col = 0; col < GRID_SIZE; col++) {
+      const idx = row * GRID_SIZE + col;
+      const cell = cells[idx];
+      const wc = countWalls(cell);
+
+      if (wc >= 3) {
+        roomCells.add(idx);
+
+        if (wc === 3) {
+          // Find the single open side
+          let openSide: 'N' | 'S' | 'E' | 'W' = 'N';
+          if (!cell.wallNorth) openSide = 'N';
+          else if (!cell.wallSouth) openSide = 'S';
+          else if (!cell.wallEast) openSide = 'E';
+          else if (!cell.wallWest) openSide = 'W';
+
+          roomCandidates.push({ idx, row, col, openSide });
+        }
+        // wc === 4 shouldn't happen after Kruskal (would be isolated),
+        // but if it does the room still gets a light, just no door
+      }
+    }
+  }
+
+  // Step 2: Restore walls for 3-wall rooms (add door-wall)
+  for (const { idx, row, col, openSide } of roomCandidates) {
+    const cell = cells[idx];
+
+    // Check if this wall was already restored by a neighboring room
+    const isAlreadyClosed = (() => {
+      switch (openSide) {
+        case 'N': return cell.wallNorth;
+        case 'S': return cell.wallSouth;
+        case 'E': return cell.wallEast;
+        case 'W': return cell.wallWest;
+      }
+    })();
+
+    if (isAlreadyClosed) {
+      // Neighbor room already restored this wall — room is enclosed, skip
+      continue;
+    }
+
+    // Restore wall on both cells and register forced door edge
+    switch (openSide) {
+      case 'N':
+        cell.wallNorth = true;
+        if (row > 0) {
+          cells[(row - 1) * GRID_SIZE + col].wallSouth = true;
+          forcedDoorEdges.add(`${row - 1}_${col}_S`);
+        }
+        break;
+      case 'S':
+        cell.wallSouth = true;
+        if (row < GRID_SIZE - 1) {
+          cells[(row + 1) * GRID_SIZE + col].wallNorth = true;
+        }
+        forcedDoorEdges.add(`${row}_${col}_S`);
+        break;
+      case 'E':
+        cell.wallEast = true;
+        if (col < GRID_SIZE - 1) {
+          cells[row * GRID_SIZE + (col + 1)].wallWest = true;
+        }
+        forcedDoorEdges.add(`${row}_${col}_E`);
+        break;
+      case 'W':
+        cell.wallWest = true;
+        if (col > 0) {
+          cells[row * GRID_SIZE + (col - 1)].wallEast = true;
+          forcedDoorEdges.add(`${row}_${col - 1}_E`);
+        }
+        break;
+    }
+  }
+
+  // ── Build wall segments ──
+  const walls: WallSegment[] = [];
+  const doors: DoorInfo[] = [];
+  const dynamicWallIds: string[] = [];
+  let wallCounter = 0;
+
+  // Helper: create wall segment from cell edge
+  function addWallSegment(
+    row: number,
+    col: number,
+    side: 'N' | 'S' | 'E' | 'W',
+    isBorder: boolean,
+  ): void {
+    const bounds = cellToWorld(row, col, GRID_SIZE, CELL_SIZE);
+    let start: [number, number];
+    let end: [number, number];
+    let axis: 'x' | 'z';
+
+    switch (side) {
+      case 'N':
+        start = [bounds.minX, bounds.minZ];
+        end = [bounds.maxX, bounds.minZ];
+        axis = 'x';
+        break;
+      case 'S':
+        start = [bounds.minX, bounds.maxZ];
+        end = [bounds.maxX, bounds.maxZ];
+        axis = 'x';
+        break;
+      case 'E':
+        start = [bounds.maxX, bounds.minZ];
+        end = [bounds.maxX, bounds.maxZ];
+        axis = 'z';
+        break;
+      case 'W':
+        start = [bounds.minX, bounds.minZ];
+        end = [bounds.minX, bounds.maxZ];
+        axis = 'z';
+        break;
+    }
+
+    if (!isBorder) {
+      // Check if this edge is a forced door (room entry)
+      const canonicalKey = `${row}_${col}_${side}`;
+      if (forcedDoorEdges.has(canonicalKey)) {
+        // Split into 3 segments: left wall | door opening | right wall
+        const doorId = `door_${row}_${col}_${side}`;
+        const midX = (start[0] + end[0]) / 2;
+        const midZ = (start[1] + end[1]) / 2;
+        const doorPos: [number, number, number] = [midX, 2, midZ];
+        const half = DOOR_WIDTH / 2;
+
+        let leftEnd: [number, number];
+        let doorStart: [number, number];
+        let doorEnd: [number, number];
+        let rightStart: [number, number];
+
+        if (axis === 'x') {
+          leftEnd = [midX - half, midZ];
+          doorStart = [midX - half, midZ];
+          doorEnd = [midX + half, midZ];
+          rightStart = [midX + half, midZ];
+        } else {
+          leftEnd = [midX, midZ - half];
+          doorStart = [midX, midZ - half];
+          doorEnd = [midX, midZ + half];
+          rightStart = [midX, midZ + half];
+        }
+
+        const doorWallId = `wall_${wallCounter++}`;
+        doors.push({ id: doorId, row, col, side, position: doorPos, axis, wallId: doorWallId });
+
+        // Left wall (static)
+        walls.push({
+          id: `wall_${wallCounter++}`, start, end: leftEnd,
+          isDynamic: false, hasDoor: false, isBorder: false,
+        });
+        // Door section (mutable — opens/closes)
+        walls.push({
+          id: doorWallId, start: doorStart, end: doorEnd,
+          isDynamic: false, hasDoor: true, doorId, isBorder: false,
+        });
+        // Right wall (static)
+        walls.push({
+          id: `wall_${wallCounter++}`, start: rightStart, end,
+          isDynamic: false, hasDoor: false, isBorder: false,
+        });
+        return;
+      }
+
+      // Only allow dynamic walls on corridor-only edges (neither cell is a room)
+      const cellIdx = row * GRID_SIZE + col;
+      let neighborIdx = -1;
+      if (side === 'S' && row < GRID_SIZE - 1) neighborIdx = (row + 1) * GRID_SIZE + col;
+      if (side === 'E' && col < GRID_SIZE - 1) neighborIdx = row * GRID_SIZE + (col + 1);
+      const touchesRoom = roomCells.has(cellIdx) || (neighborIdx >= 0 && roomCells.has(neighborIdx));
+
+      if (!touchesRoom && rng() < DYNAMIC_RATIO) {
+        const wallId = `wall_${wallCounter++}`;
+        walls.push({
+          id: wallId, start, end,
+          isDynamic: true, hasDoor: false, isBorder: false,
+        });
+        dynamicWallIds.push(wallId);
+        return;
+      }
+    }
+
+    // Static wall (border or non-dynamic internal)
+    walls.push({
+      id: `wall_${wallCounter++}`, start, end,
+      isDynamic: false, hasDoor: false, isBorder,
+    });
+  }
+
+  // Track which edges we've already processed to avoid duplicates
+  const processedEdges = new Set<string>();
+
+  for (let row = 0; row < GRID_SIZE; row++) {
+    for (let col = 0; col < GRID_SIZE; col++) {
+      const cell = cells[row * GRID_SIZE + col];
+
+      // North wall — only process if this is the top row (border)
+      if (row === 0 && cell.wallNorth) {
+        addWallSegment(row, col, 'N', true);
+      }
+
+      // West wall — only process if this is the left column (border)
+      if (col === 0 && cell.wallWest) {
+        addWallSegment(row, col, 'W', true);
+      }
+
+      // South wall
+      if (cell.wallSouth) {
+        const edgeKey = `${row}_${col}_S`;
+        if (!processedEdges.has(edgeKey)) {
+          processedEdges.add(edgeKey);
+          // Also mark the matching north edge of the cell below
+          if (row < GRID_SIZE - 1) {
+            processedEdges.add(`${row + 1}_${col}_N`);
+          }
+          const isBorder = row === GRID_SIZE - 1;
+          addWallSegment(row, col, 'S', isBorder);
+        }
+      }
+
+      // East wall
+      if (cell.wallEast) {
+        const edgeKey = `${row}_${col}_E`;
+        if (!processedEdges.has(edgeKey)) {
+          processedEdges.add(edgeKey);
+          // Also mark the matching west edge of the cell to the right
+          if (col < GRID_SIZE - 1) {
+            processedEdges.add(`${row}_${col + 1}_W`);
+          }
+          const isBorder = col === GRID_SIZE - 1;
+          addWallSegment(row, col, 'E', isBorder);
+        }
+      }
+    }
+  }
+
+  // ── Build lights (only in room cells) ──
+  const lights: LightInfo[] = [];
+  for (const idx of roomCells) {
+    const row = Math.floor(idx / GRID_SIZE);
+    const col = idx % GRID_SIZE;
+    const bounds = cellToWorld(row, col, GRID_SIZE, CELL_SIZE);
+    lights.push({
+      id: `light_${row}_${col}`,
+      row,
+      col,
+      position: [bounds.centerX, 3.8, bounds.centerZ],
+    });
+  }
+
+  // ── Build room info with themed names ──
+  const shuffledNames = [...ROOM_NAME_POOL];
+  shuffle(shuffledNames, rng);
+
+  // Build a lookup: cell index → doorId (from doors array)
+  const cellDoorMap = new Map<number, string>();
+  for (const door of doors) {
+    const cellIdx = door.row * GRID_SIZE + door.col;
+    // The door belongs to the cell whose wall it's on. Find which cell is the room.
+    if (roomCells.has(cellIdx)) {
+      cellDoorMap.set(cellIdx, door.id);
+    } else {
+      // Check the neighbor cell on the other side of the door
+      let neighborIdx = -1;
+      if (door.side === 'S' && door.row < GRID_SIZE - 1) neighborIdx = (door.row + 1) * GRID_SIZE + door.col;
+      if (door.side === 'E' && door.col < GRID_SIZE - 1) neighborIdx = door.row * GRID_SIZE + (door.col + 1);
+      if (door.side === 'N' && door.row > 0) neighborIdx = (door.row - 1) * GRID_SIZE + door.col;
+      if (door.side === 'W' && door.col > 0) neighborIdx = door.row * GRID_SIZE + (door.col - 1);
+      if (neighborIdx >= 0 && roomCells.has(neighborIdx)) {
+        cellDoorMap.set(neighborIdx, door.id);
+      }
+    }
+  }
+
+  const rooms: MazeRoomInfo[] = [];
+  let nameIdx = 0;
+  for (const idx of roomCells) {
+    const row = Math.floor(idx / GRID_SIZE);
+    const col = idx % GRID_SIZE;
+    const bounds = cellToWorld(row, col, GRID_SIZE, CELL_SIZE);
+    rooms.push({
+      id: `room_${row}_${col}`,
+      row,
+      col,
+      name: shuffledNames[nameIdx % shuffledNames.length],
+      position: [bounds.centerX, 0, bounds.centerZ],
+      doorId: cellDoorMap.get(idx) ?? null,
+    });
+    nameIdx++;
+  }
+
+  // ── Build task stations (scaled to player count) ──
+  const TASKS_PER_PLAYER = 5;
+  const totalTasks = Math.min(rooms.length, Math.max(10, playerCount * TASKS_PER_PLAYER));
+
+  // Difficulty distribution: 40% easy, 40% medium, 20% hard
+  const easyCount  = Math.round(totalTasks * 0.40);
+  const hardCount  = Math.round(totalTasks * 0.20);
+  const mediumCount = totalTasks - easyCount - hardCount;
+
+  // Build a type pool sampling cyclically from each difficulty bucket
+  const easyTypes  = shuffle([...TASK_TYPES_BY_DIFFICULTY.easy], rng);
+  const mediumTypes = shuffle([...TASK_TYPES_BY_DIFFICULTY.medium], rng);
+  const hardTypes  = shuffle([...TASK_TYPES_BY_DIFFICULTY.hard], rng);
+
+  const taskTypePool: TaskType[] = [];
+  for (let i = 0; i < easyCount; i++)   taskTypePool.push(easyTypes[i % easyTypes.length]);
+  for (let i = 0; i < mediumCount; i++) taskTypePool.push(mediumTypes[i % mediumTypes.length]);
+  for (let i = 0; i < hardCount; i++)   taskTypePool.push(hardTypes[i % hardTypes.length]);
+  shuffle(taskTypePool, rng);
+
+  // Select rooms: prioritize themed rooms first, then fill with others
+  const roomsShuffled = shuffle([...rooms], rng);
+  const themedRooms = roomsShuffled.filter(r => r.name in ROOM_TASK_MAP);
+  const unthemedRooms = roomsShuffled.filter(r => !(r.name in ROOM_TASK_MAP));
+  const candidateRooms = [...themedRooms, ...unthemedRooms].slice(0, totalTasks);
+
+  let poolCursor = 0;
+  const tasks: TaskStationInfo[] = [];
+  for (const room of candidateRooms) {
+    // Use thematic mapping when available, otherwise pick from pool
+    const taskType: TaskType = (room.name in ROOM_TASK_MAP)
+      ? ROOM_TASK_MAP[room.name]
+      : taskTypePool[poolCursor++ % taskTypePool.length];
+    const meta = TASK_REGISTRY[taskType];
+    const offsetAngle = rng() * Math.PI * 2;
+    const offsetDist = 2.5;
+    tasks.push({
+      id: `task_${room.row}_${room.col}`,
+      roomId: room.id,
+      row: room.row,
+      col: room.col,
+      taskType,
+      difficulty: meta.difficulty,
+      displayName: meta.displayName,
+      position: [
+        room.position[0] + Math.cos(offsetAngle) * offsetDist,
+        0,
+        room.position[2] + Math.sin(offsetAngle) * offsetDist,
+      ],
+    });
+  }
+
+  // ── Build decorative objects (0-2 per room) ──
+  const decorations: DecoObjectInfo[] = [];
+  let decoIdx = 0;
+  for (const room of rooms) {
+    const decoCount = Math.floor(rng() * 3); // 0, 1, or 2
+    for (let d = 0; d < decoCount; d++) {
+      const angle = rng() * Math.PI * 2;
+      const dist = 1 + rng() * 2;
+      decorations.push({
+        id: `deco_${room.row}_${room.col}_${decoIdx++}`,
+        roomId: room.id,
+        position: [
+          room.position[0] + Math.cos(angle) * dist,
+          0,
+          room.position[2] + Math.sin(angle) * dist,
+        ],
+        decoType: DECO_TYPES[Math.floor(rng() * DECO_TYPES.length)],
+        scale: 0.5 + rng(),
+        rotationY: rng() * Math.PI * 2,
+      });
+    }
+  }
+
+  // ── Build shelter zones (3-4 safe rooms) ──
+  const shelterCount = Math.min(4, Math.max(3, Math.floor(rooms.length * 0.3)));
+  const shelterCandidates = shuffle([...rooms], rng);
+  const shelterZones: ShelterZone[] = shelterCandidates.slice(0, shelterCount).map(r => ({
+    position: r.position as [number, number, number],
+    radius: CELL_SIZE / 2 - 0.5, // ~4.5 meters (most of the cell)
+    roomId: r.id,
+  }));
+
+  // ── Build oxygen generators (2-3 per map, in specific rooms) ──
+  const OXYGEN_ROOM_NAMES = new Set([
+    'Oxigênio', 'Gerador', 'Reator', 'Máquinas', 'Ventilação',
+    'Filtros', 'Câmara Ar', 'Propulsão', 'Subestação', 'Compressor',
+    'Caldeira', 'Servidor', 'Extração',
+  ]);
+  const oxygenCandidates = rooms.filter(r => OXYGEN_ROOM_NAMES.has(r.name));
+  // Fallback: if fewer than 2 candidates, pick random rooms
+  if (oxygenCandidates.length < 2) {
+    const fallback = shuffle([...rooms], rng);
+    for (const r of fallback) {
+      if (!oxygenCandidates.some(c => c.id === r.id)) {
+        oxygenCandidates.push(r);
+        if (oxygenCandidates.length >= 3) break;
+      }
+    }
+  }
+  const oxygenCount = Math.min(3, oxygenCandidates.length);
+  const oxygenRooms = shuffle([...oxygenCandidates], rng).slice(0, oxygenCount);
+  const oxygenGenerators: OxygenGeneratorInfo[] = oxygenRooms.map(r => {
+    const offsetAngle = rng() * Math.PI * 2;
+    const offsetDist = 2.0;
+    return {
+      id: `oxy_${r.row}_${r.col}`,
+      roomId: r.id,
+      roomName: r.name,
+      position: [
+        r.position[0] + Math.cos(offsetAngle) * offsetDist,
+        0,
+        r.position[2] + Math.sin(offsetAngle) * offsetDist,
+      ] as [number, number, number],
+    };
+  });
+
+  return {
+    seed,
+    gridSize: GRID_SIZE,
+    cellSize: CELL_SIZE,
+    cells,
+    walls,
+    doors,
+    lights,
+    rooms,
+    dynamicWallIds,
+    tasks,
+    decorations,
+    shelterZones,
+    oxygenGenerators,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Initialize mutable maze state (all doors closed/unlocked, lights on)
+// ═══════════════════════════════════════════════════════════════
+
+import type { MazeSnapshot, DoorState, TaskStationState } from './maze-types.js';
+
+export function createInitialMazeSnapshot(layout: MazeLayout): MazeSnapshot {
+  const doorStates: Record<string, DoorState> = {};
+  for (const door of layout.doors) {
+    doorStates[door.id] = {
+      isOpen: false,
+      isLocked: false,
+      lockedBy: null,
+    };
+  }
+
+  const lightStates: Record<string, boolean> = {};
+  for (const light of layout.lights) {
+    lightStates[light.id] = true; // all lights on
+  }
+
+  const dynamicWallStates: Record<string, boolean> = {};
+  for (const wallId of layout.dynamicWallIds) {
+    dynamicWallStates[wallId] = true; // all dynamic walls start closed
+  }
+
+  const taskStates: Record<string, TaskStationState> = {};
+  for (const task of layout.tasks) {
+    taskStates[task.id] = {
+      completionState: 'pending',
+      activePlayerId: null,
+      completedByPlayerId: null,
+    };
+  }
+
+  return { doorStates, lightStates, dynamicWallStates, muralhaWalls: [], taskStates };
+}

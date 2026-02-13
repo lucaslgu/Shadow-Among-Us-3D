@@ -35,6 +35,9 @@ importers:
       '@shadow/shared':
         specifier: workspace:*
         version: link:../shared
+      postprocessing:
+        specifier: ^6.38.2
+        version: 6.38.2(three@0.172.0)
       react:
         specifier: ^19.0.0
         version: 19.2.4

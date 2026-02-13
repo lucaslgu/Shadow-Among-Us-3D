@@ -210,14 +210,22 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
       }));
     });
 
-    socket.on('game:started', ({ role, power, playerInfo }) => {
+    socket.on('game:started', ({ role, power, playerInfo, mazeLayout, cosmicScenario, assignedTasks }) => {
       const gameStore = useGameStore.getState();
       const playerId = get().playerId;
       if (playerId) gameStore.setLocalPlayer(playerId);
       gameStore.setLocalRole(role as PlayerRole, power as PowerType, playerInfo);
-      gameStore.setPhase('playing');
+      if (mazeLayout) gameStore.setMazeLayout(mazeLayout);
+      if (cosmicScenario) gameStore.setCosmicScenario(cosmicScenario);
+      if (assignedTasks) gameStore.setAssignedTasks(assignedTasks);
+      // Enter loading phase — navigate to game route so the 3D scene starts loading
+      gameStore.setPhase('loading');
       const roomCode = get().currentRoomCode;
       navigateFn?.(`/game/${roomCode}`);
+    });
+
+    socket.on('game:loading-progress', ({ loadedPlayerIds, totalPlayers }) => {
+      useGameStore.getState().setLoadingProgress(loadedPlayerIds, totalPlayers);
     });
 
     socket.on('game:state-snapshot', (snapshot) => {
@@ -238,6 +246,30 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
         text,
         timestamp: Date.now(),
       });
+    });
+
+    socket.on('task:started', ({ taskId, playerId }) => {
+      useGameStore.getState().updateTaskState(taskId, 'in_progress', playerId);
+    });
+
+    socket.on('task:completed', ({ taskId }) => {
+      useGameStore.getState().updateTaskState(taskId, 'completed', null);
+    });
+
+    socket.on('task:cancelled', ({ taskId }) => {
+      useGameStore.getState().updateTaskState(taskId, 'pending', null);
+    });
+
+    socket.on('task:start-failed', ({ taskId }) => {
+      // Server rejected the task start — close the overlay if it was opened optimistically
+      const store = useGameStore.getState();
+      if (store.activeTaskId === taskId && store.taskOverlayVisible) {
+        store.closeTaskOverlay();
+      }
+    });
+
+    socket.on('ghost:death-screen', ({ cause }) => {
+      useGameStore.getState().setGhostState(true, cause);
     });
 
     socket.on('disconnect', () => {

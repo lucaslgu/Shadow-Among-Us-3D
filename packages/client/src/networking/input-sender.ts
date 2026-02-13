@@ -25,6 +25,7 @@ export class InputSender {
   }
 
   start() {
+    console.log('[InputSender] Started — sending at 20Hz');
     this.intervalId = setInterval(() => {
       const keys = this.getKeys();
       const mouse = this.getMouse();
@@ -48,6 +49,7 @@ export class InputSender {
 
   stop() {
     if (this.intervalId) {
+      console.log('[InputSender] Stopped');
       clearInterval(this.intervalId);
       this.intervalId = null;
     }

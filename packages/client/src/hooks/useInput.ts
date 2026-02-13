@@ -1,11 +1,12 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { mouseState, inputState } from '../networking/mouse-state.js';
+import { playFlashlightToggle } from '../audio/sound-manager.js';
 
 export interface InputRefs {
   keysRef: React.MutableRefObject<{ forward: boolean; backward: boolean; left: boolean; right: boolean }>;
   mouseRef: React.MutableRefObject<{ x: number; y: number }>;
   arrowKeysRef: React.MutableRefObject<{ forward: boolean; backward: boolean; left: boolean; right: boolean }>;
-  actionRef: React.MutableRefObject<{ power: boolean; powerConsumed: boolean; flashlightOn: boolean }>;
+  actionRef: React.MutableRefObject<{ power: boolean; powerConsumed: boolean; powerDownTime: number; powerUp: boolean; flashlightOn: boolean; mindControlPower: boolean }>;
 }
 
 export function useInput(): InputRefs {
@@ -14,7 +15,7 @@ export function useInput(): InputRefs {
   // Arrow keys for Mind Controller dual-control
   const arrowKeysRef = useRef({ forward: false, backward: false, left: false, right: false });
   // Action keys
-  const actionRef = useRef({ power: false, powerConsumed: false, flashlightOn: true });
+  const actionRef = useRef({ power: false, powerConsumed: false, powerDownTime: 0, powerUp: false, flashlightOn: true, mindControlPower: false });
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -38,13 +39,22 @@ export function useInput(): InputRefs {
           if (!actionRef.current.powerConsumed) {
             actionRef.current.power = true;
             actionRef.current.powerConsumed = true;
+            actionRef.current.powerDownTime = Date.now();
           }
+          break;
+        // Mind Control: activate target's power (E)
+        case 'KeyE':
+          actionRef.current.mindControlPower = true;
+          break;
+        // Jump (Space)
+        case 'Space':
+          inputState.jumpRequested = true;
           break;
         // Flashlight toggle (F) — blocked while battery is depleted
         case 'KeyF':
-          if (!actionRef.current.flashlightOn && inputState.batteryDepleted) break;
-          actionRef.current.flashlightOn = !actionRef.current.flashlightOn;
-          inputState.flashlightOn = actionRef.current.flashlightOn;
+          if (!inputState.flashlightOn && inputState.batteryDepleted) break;
+          inputState.flashlightOn = !inputState.flashlightOn;
+          playFlashlightToggle();
           break;
       }
     }
@@ -61,6 +71,7 @@ export function useInput(): InputRefs {
         case 'ArrowRight': arrowKeysRef.current.right = false; break;
         case 'KeyQ':
           actionRef.current.powerConsumed = false;
+          actionRef.current.powerUp = true;
           break;
       }
     }
@@ -81,6 +92,7 @@ export function useInput(): InputRefs {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('mousemove', onMouseMove);
+    console.log('[useInput] Keyboard + mouse listeners registered');
 
     return () => {
       window.removeEventListener('keydown', onKeyDown);

@@ -9,4 +9,5 @@ export const inputState = {
   flashlightOn: true,
   batteryLevel: 1,       // 0–1
   batteryDepleted: false, // true when drained to 0, stays true until recharged to 20%
+  jumpRequested: false,   // set true on Space press, consumed by gravity hook
 };

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useNetworkStore } from '../stores/network-store.js';
+import { SoundSettings } from './SoundSettings.js';
 import * as s from './styles.js';
 
 export function MainMenu() {
@@ -79,6 +80,9 @@ export function MainMenu() {
             Create Room
           </button>
         </div>
+
+        {/* Sound controls */}
+        <SoundSettings />
 
         <div
           style={{

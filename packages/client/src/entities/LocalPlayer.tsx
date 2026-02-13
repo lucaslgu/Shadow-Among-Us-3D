@@ -1,29 +1,65 @@
-import { useRef } from 'react';
+import { useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGameStore } from '../stores/game-store.js';
 import { mouseState, inputState } from '../networking/mouse-state.js';
 import * as THREE from 'three';
 import { DEFAULT_GAME_SETTINGS } from '@shadow/shared';
+import { playFootstep } from '../audio/sound-manager.js';
 
-const BATTERY_DRAIN_RATE = 0.05;   // per second (20s full drain)
-const BATTERY_RECHARGE_RATE = 0.08; // per second (~12.5s full recharge)
-const BATTERY_MIN_TO_RELIGHT = 0.2; // 20% minimum to turn back on
+const BATTERY_DRAIN_RATE = 0.025;   // per second (~40s full drain)
+const BATTERY_RECHARGE_RATE = 0.06;  // per second (~16.7s full recharge)
+const BATTERY_MIN_TO_RELIGHT = 0.15; // 15% minimum to turn back on
+const FOOTSTEP_INTERVAL = 0.38;     // seconds between footsteps
+const FOOTSTEP_SPEED_THRESHOLD = 0.5; // minimum speed to trigger footsteps
+
+// Reusable objects to avoid per-frame allocations
+const _targetPos = new THREE.Vector3();
+const _targetQuat = new THREE.Quaternion();
 
 export function LocalPlayer({ color }: { color: string }) {
   const groupRef = useRef<THREE.Group>(null!);
   const spotRef = useRef<THREE.SpotLight>(null!);
-  const targetObj = useRef(new THREE.Object3D());
+  const spotTargetRef = useRef<THREE.Object3D>(null!);
+  const prevPos = useRef<[number, number, number]>([0, 0, 0]);
+  const footstepTimer = useRef(FOOTSTEP_INTERVAL * 0.8);
+
+  // Link the JSX-managed object3D as the spotlight's target
+  useEffect(() => {
+    const spot = spotRef.current;
+    const target = spotTargetRef.current;
+    if (spot && target) {
+      spot.target = target;
+    }
+  }, []);
 
   useFrame((_state, delta) => {
-    const { localPosition, localRotation } = useGameStore.getState();
+    const gameState = useGameStore.getState();
+    const { localPosition, localRotation, isGhost } = gameState;
     const [px, py, pz] = localPosition;
+
+    // Footstep sounds — detect movement by position delta (skip if ghost)
+    const dx = px - prevPos.current[0];
+    const dz = pz - prevPos.current[2];
+    const speed = delta > 0 ? Math.sqrt(dx * dx + dz * dz) / delta : 0;
+    prevPos.current = [px, py, pz];
+
+    if (!isGhost && speed > FOOTSTEP_SPEED_THRESHOLD) {
+      footstepTimer.current += delta;
+      if (footstepTimer.current >= FOOTSTEP_INTERVAL) {
+        playFootstep();
+        footstepTimer.current = 0;
+      }
+    } else {
+      // Reset timer near threshold so first step plays quickly
+      footstepTimer.current = FOOTSTEP_INTERVAL * 0.8;
+    }
     const [rx, ry, rz, rw] = localRotation;
 
-    const targetPos = new THREE.Vector3(px, py, pz);
-    const targetQuat = new THREE.Quaternion(rx, ry, rz, rw);
+    _targetPos.set(px, py, pz);
+    _targetQuat.set(rx, ry, rz, rw);
 
-    groupRef.current.position.lerp(targetPos, 0.3);
-    groupRef.current.quaternion.slerp(targetQuat, 0.3);
+    groupRef.current.position.lerp(_targetPos, 0.3);
+    groupRef.current.quaternion.slerp(_targetQuat, 0.3);
 
     // Battery drain / recharge
     if (inputState.flashlightOn) {
@@ -39,26 +75,26 @@ export function LocalPlayer({ color }: { color: string }) {
       }
     }
 
-    // Position flashlight at camera eye level (world coords, outside group)
-    if (spotRef.current) {
-      spotRef.current.target = targetObj.current;
-      spotRef.current.visible = inputState.flashlightOn;
+    // Position flashlight at camera eye level (disabled when ghost)
+    const spot = spotRef.current;
+    const spotTarget = spotTargetRef.current;
+    if (spot && spotTarget) {
+      spot.visible = !isGhost && inputState.flashlightOn;
       const yaw = mouseState.yaw;
       const pitch = mouseState.pitch;
       const eyeY = py + 1.2;
 
-      spotRef.current.position.set(px, eyeY, pz);
+      spot.position.set(px, eyeY, pz);
 
       // Forward direction matches camera: (sin(yaw)*cos(pitch), -sin(pitch), -cos(yaw)*cos(pitch))
       const fx = Math.sin(yaw) * Math.cos(pitch);
       const fy = -Math.sin(pitch);
       const fz = -Math.cos(yaw) * Math.cos(pitch);
-      targetObj.current.position.set(
-        px + fx * 5,
-        eyeY + fy * 5,
-        pz + fz * 5,
+      spotTarget.position.set(
+        px + fx * 10,
+        eyeY + fy * 10,
+        pz + fz * 10,
       );
-      targetObj.current.updateMatrixWorld();
     }
   });
 
@@ -72,19 +108,21 @@ export function LocalPlayer({ color }: { color: string }) {
         </mesh>
       </group>
 
+      {/* Flashlight target — R3F manages this in the scene graph */}
+      <object3D ref={spotTargetRef} />
+
       {/* Flashlight (outside group to avoid double transform) */}
       <spotLight
         ref={spotRef}
-        angle={Math.PI / 5}
-        penumbra={0.4}
-        intensity={33}
+        angle={Math.PI / 4}
+        penumbra={0.5}
+        intensity={600}
         distance={DEFAULT_GAME_SETTINGS.flashlightRange}
         castShadow
         shadow-mapSize-width={512}
         shadow-mapSize-height={512}
         color="#ffe4b5"
       />
-      <primitive object={targetObj.current} />
     </>
   );
 }

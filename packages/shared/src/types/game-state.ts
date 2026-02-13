@@ -1,6 +1,6 @@
 import type { PlayerState } from './player.js';
 
-export type GamePhase = 'lobby' | 'playing' | 'meeting' | 'results';
+export type GamePhase = 'lobby' | 'loading' | 'playing' | 'meeting' | 'results';
 
 export interface GameSettings {
   maxPlayers: number;
@@ -19,7 +19,7 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   votingTime: 30000,
   killCooldown: 25000,
   playerSpeed: 5,
-  flashlightRange: 15,
+  flashlightRange: 80,
 };
 
 export interface GameState {

@@ -1,4 +1,4 @@
-import type { InputSnapshot } from '@shadow/shared';
+import type { InputSnapshot, CollisionContext } from '@shadow/shared';
 import { applyMovement, yawToQuaternion } from '@shadow/shared';
 
 export interface MovablePlayer {
@@ -8,10 +8,10 @@ export interface MovablePlayer {
   lastProcessedInput: number;
 }
 
-export function processInput(player: MovablePlayer, input: InputSnapshot, dt: number): void {
+export function processInput(player: MovablePlayer, input: InputSnapshot, dt: number, collisionCtx?: CollisionContext): void {
   if (input.seq <= player.lastProcessedInput) return;
 
-  player.position = applyMovement(player.position, input, dt, player.speedMultiplier);
+  player.position = applyMovement(player.position, input, dt, player.speedMultiplier, collisionCtx);
   player.rotation = yawToQuaternion(input.mouseX);
   player.lastProcessedInput = input.seq;
 }

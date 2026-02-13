@@ -3,18 +3,35 @@ import { useFrame } from '@react-three/fiber';
 import { useGameStore } from '../stores/game-store.js';
 import { interpolatePlayer, getInterpolationRenderTime } from '../networking/interpolation.js';
 import * as THREE from 'three';
+import { AstronautModel, type AstronautAnimData } from './AstronautModel.js';
+
+// Reusable objects to avoid per-frame allocations
+const _tmpVec3 = new THREE.Vector3();
+const _tmpQuat = new THREE.Quaternion();
+
+const WALK_SPEED_THRESHOLD = 0.3;
 
 interface RemotePlayerProps {
   playerId: string;
-  name: string;
-  color: string;
+  color: string; // initial color — overridden by snapshot in useFrame
 }
 
 export function RemotePlayer({ playerId, color }: RemotePlayerProps) {
   const groupRef = useRef<THREE.Group>(null!);
+  const prevPos = useRef<[number, number, number]>([0, 0, 0]);
+  const smoothSpeed = useRef(0);
 
-  useFrame(() => {
-    const { snapshotBuffer } = useGameStore.getState();
+  // Mutable data object — mutated in useFrame, read by AstronautModel's useFrame
+  const animData = useRef<AstronautAnimData>({
+    animState: 'idle',
+    speed: 0,
+    color,
+    opacity: 1,
+    visible: true,
+  }).current;
+
+  useFrame((_, delta) => {
+    const { snapshotBuffer, players, isGhost: localIsGhost } = useGameStore.getState();
     const renderTime = getInterpolationRenderTime();
 
     const interp = interpolatePlayer(playerId, snapshotBuffer, renderTime);
@@ -22,31 +39,61 @@ export function RemotePlayer({ playerId, color }: RemotePlayerProps) {
     if (interp) {
       const [px, py, pz] = interp.position;
       const [rx, ry, rz, rw] = interp.rotation;
-      groupRef.current.position.lerp(new THREE.Vector3(px, py, pz), 0.5);
-      groupRef.current.quaternion.slerp(new THREE.Quaternion(rx, ry, rz, rw), 0.5);
-      groupRef.current.visible = !interp.isInvisible && interp.isAlive;
+      _tmpVec3.set(px, py, pz);
+      _tmpQuat.set(rx, ry, rz, rw);
+      groupRef.current.position.lerp(_tmpVec3, 0.5);
+      groupRef.current.quaternion.slerp(_tmpQuat, 0.5);
+
+      // Compute movement speed from position delta
+      const dx = px - prevPos.current[0];
+      const dz = pz - prevPos.current[2];
+      const rawSpeed = delta > 0 ? Math.sqrt(dx * dx + dz * dz) / delta : 0;
+      smoothSpeed.current += (rawSpeed - smoothSpeed.current) * 0.3; // smooth
+      prevPos.current = [px, py, pz];
+
+      // Determine visibility
+      if (interp.isGhost) {
+        groupRef.current.visible = localIsGhost;
+      } else {
+        groupRef.current.visible = !interp.isInvisible && interp.isAlive;
+      }
+
+      // Determine animation state
+      if (interp.isGhost) {
+        animData.animState = 'ghost';
+        animData.opacity = 0.3;
+        animData.color = '#4488ff';
+        animData.visible = groupRef.current.visible;
+      } else if (!interp.isAlive) {
+        animData.animState = 'death';
+        animData.visible = groupRef.current.visible;
+      } else {
+        animData.animState = smoothSpeed.current > WALK_SPEED_THRESHOLD ? 'walk' : 'idle';
+        animData.speed = smoothSpeed.current;
+        animData.opacity = interp.isImpermeable ? 0.4 : 1;
+        animData.visible = groupRef.current.visible;
+
+        // Update color from latest snapshot (for Metamorph etc.)
+        const snap = players[playerId];
+        animData.color = snap?.color ?? color;
+      }
     }
   });
 
   return (
     <group ref={groupRef}>
-      {/* Capsule body */}
-      <mesh position={[0, 0.6, 0]} castShadow>
-        <capsuleGeometry args={[0.3, 0.6, 8, 16]} />
-        <meshStandardMaterial color={color} roughness={0.5} metalness={0.3} />
-      </mesh>
+      <AstronautModel data={animData} />
 
       {/* Flashlight (no shadows for performance) */}
       <spotLight
         position={[0, 1, -0.3]}
-        angle={Math.PI / 5}
-        penumbra={0.4}
-        intensity={22}
-        distance={12}
+        angle={Math.PI / 4}
+        penumbra={0.5}
+        intensity={80}
+        distance={50}
         castShadow={false}
         color="#ffe4b5"
       />
-
     </group>
   );
 }

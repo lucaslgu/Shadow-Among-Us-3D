@@ -12,9 +12,13 @@ import type {
   LobbyPlayer,
   GamePhase,
   InputSnapshot,
+  MazeLayout,
+  MazeSnapshot,
 } from '@shadow/shared';
-import { DEFAULT_GAME_SETTINGS, PowerType } from '@shadow/shared';
-import { startGameLoop, activatePower, deactivatePower, type GamePlayerState } from './game/game-loop.js';
+import { DEFAULT_GAME_SETTINGS, PowerType, POWER_CONFIGS, generateMaze, createInitialMazeSnapshot } from '@shadow/shared';
+import type { CosmicScenario } from '@shadow/shared';
+import { startGameLoop, activatePower, deactivatePower, findNearbyPlayers, attemptKill, interactDoor, startTask, completeTask, cancelTask, ghostStartTask, MAX_HEALTH, type GamePlayerState } from './game/game-loop.js';
+import { generateCosmicScenario } from './services/gemini.js';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
 const DISCONNECT_GRACE_MS = 30_000;
@@ -42,7 +46,14 @@ interface PlayerData {
   name: string;
   ready: boolean;
   joinedAt: number;
+  color: string;
 }
+
+const PLAYER_COLORS = [
+  '#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6',
+  '#e67e22', '#1abc9c', '#e84393', '#00cec9', '#6c5ce7',
+  '#fd79a8', '#ffeaa7', '#dfe6e9', '#636e72', '#b2bec3',
+];
 
 interface RoomData {
   roomCode: string;
@@ -55,6 +66,11 @@ interface RoomData {
   createdAt: number;
   gamePlayers: Map<string, GamePlayerState> | null;
   gameTickInterval: ReturnType<typeof setInterval> | null;
+  mazeLayout: MazeLayout | null;
+  mazeSnapshot: MazeSnapshot | null;
+  cosmicScenario: CosmicScenario | null;
+  loadedPlayers: Set<string>;
+  currentEra: string;
 }
 
 const rooms = new Map<string, RoomData>();
@@ -109,6 +125,15 @@ function getListableRooms(): RoomInfo[] {
     .map(getRoomInfo);
 }
 
+function getNextAvailableColor(room: RoomData): string {
+  const usedColors = new Set<string>();
+  for (const [, p] of room.players) usedColors.add(p.color);
+  for (const c of PLAYER_COLORS) {
+    if (!usedColors.has(c)) return c;
+  }
+  return PLAYER_COLORS[0]; // fallback (should never happen with 15 colors / 15 max players)
+}
+
 function buildLobbyPlayers(room: RoomData): LobbyPlayer[] {
   const players: LobbyPlayer[] = [];
   for (const [token, playerData] of room.players) {
@@ -118,6 +143,7 @@ function buildLobbyPlayers(room: RoomData): LobbyPlayer[] {
         id: session.socketId,
         name: playerData.name,
         isHost: session.socketId === room.hostId,
+        color: playerData.color,
       });
     }
   }
@@ -305,10 +331,15 @@ io.on('connection', (socket) => {
       password: password?.trim() || null,
       maxPlayers: Math.min(Math.max(4, maxPlayers ?? DEFAULT_GAME_SETTINGS.maxPlayers), 15),
       phase: 'lobby',
-      players: new Map([[token, { name, ready: false, joinedAt: now }]]),
+      players: new Map([[token, { name, ready: false, joinedAt: now, color: PLAYER_COLORS[0] }]]),
       createdAt: now,
       gamePlayers: null,
       gameTickInterval: null,
+      mazeLayout: null,
+      mazeSnapshot: null,
+      cosmicScenario: null,
+      loadedPlayers: new Set(),
+      currentEra: 'stable',
     };
 
     rooms.set(roomCode, room);
@@ -358,7 +389,8 @@ io.on('connection', (socket) => {
     // Leave any previous room
     if (sess.roomCode) removePlayerFromRoom(token);
 
-    room.players.set(token, { name, ready: false, joinedAt: Date.now() });
+    const color = getNextAvailableColor(room);
+    room.players.set(token, { name, ready: false, joinedAt: Date.now(), color });
     sess.playerName = name;
     sess.roomCode = roomCode;
     socket.join(roomCode);
@@ -451,6 +483,58 @@ io.on('connection', (socket) => {
     io.to(room.roomCode).emit('player:ready', { playerId: socket.id, ready });
   });
 
+  // --- Select Color ---
+  socket.on('player:select-color', ({ color }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'lobby') return;
+    const player = room.players.get(token);
+    if (!player) return;
+    // Validate color is in the palette
+    if (!PLAYER_COLORS.includes(color)) return;
+    // Validate color is not in use by another player
+    for (const [otherToken, otherPlayer] of room.players) {
+      if (otherToken !== token && otherPlayer.color === color) return;
+    }
+    player.color = color;
+    broadcastPlayerList(room);
+  });
+
+  // --- Player Loaded (client finished loading 3D scene) ---
+  socket.on('player:loaded', () => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'loading' || !room.gamePlayers) return;
+
+    room.loadedPlayers.add(token);
+    const totalPlayers = room.gamePlayers.size;
+    const loadedPlayerIds = Array.from(room.loadedPlayers).map((t) => {
+      const s = sessions.get(t);
+      return s ? s.socketId : '';
+    }).filter(Boolean);
+
+    console.log(`[Server] ${sess.playerName} loaded (${loadedPlayerIds.length}/${totalPlayers}) in room ${room.roomCode}`);
+
+    // Broadcast loading progress to all
+    io.to(room.roomCode).emit('game:loading-progress', { loadedPlayerIds, totalPlayers });
+
+    // Check if ALL players have loaded
+    if (room.loadedPlayers.size >= totalPlayers) {
+      room.phase = 'playing';
+      io.to(room.roomCode).emit('game:phase-change', { phase: 'playing' });
+
+      // Start game loop now that everyone is ready
+      room.gameTickInterval = startGameLoop(io, room.roomCode, room.gamePlayers, room.mazeLayout!, room.mazeSnapshot!, room.cosmicScenario!, (era) => { room.currentEra = era; });
+      console.log(`[Server] All players loaded — game started in room ${room.roomCode}`);
+    }
+  });
+
   // --- Chat Message ---
   socket.on('chat:message', ({ text }) => {
     const token = socketToSession.get(socket.id);
@@ -475,7 +559,7 @@ io.on('connection', (socket) => {
     const room = rooms.get(sess.roomCode);
     if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
     const gp = room.gamePlayers.get(token);
-    if (!gp || !gp.isAlive) return;
+    if (!gp || (!gp.isAlive && !gp.isGhost)) return;
     gp.inputQueue.push(inputData);
   });
 
@@ -492,7 +576,7 @@ io.on('connection', (socket) => {
     if (!gp) return;
     // Deactivate current power if active
     if (gp.powerActive) {
-      deactivatePower(io, room.roomCode, gp, room.gamePlayers);
+      deactivatePower(io, room.roomCode, gp, room.gamePlayers, room.mazeSnapshot ?? undefined);
     }
     // Cycle to next power
     const allPowers = Object.values(PowerType);
@@ -506,8 +590,38 @@ io.on('connection', (socket) => {
     console.log(`[DEBUG] ${gp.name} power changed to: ${allPowers[nextIdx]}`);
   });
 
+  // --- Power Request Targets (for target-selection UI) ---
+  socket.on('power:request-targets', () => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive) return;
+
+    const powerType = gp.power as PowerType;
+    const config = POWER_CONFIGS[powerType];
+    if (!config || !config.requiresTarget || !config.targetRange) return;
+
+    // Validate not on cooldown and not already active
+    const now = Date.now();
+    if (now < gp.powerCooldownEnd || gp.powerActive) return;
+
+    const nearby = findNearbyPlayers(gp, room.gamePlayers, config.targetRange);
+    if (nearby.length === 0) {
+      socket.emit('power:no-targets');
+      return;
+    }
+
+    socket.emit('power:nearby-targets', {
+      targets: nearby.map((t) => ({ id: t.socketId, name: t.name, color: t.color, distance: t.distance })),
+    });
+  });
+
   // --- Power Activate (toggle) ---
-  socket.on('power:activate', ({ targetId }) => {
+  socket.on('power:activate', ({ targetId, wallPosition, teleportPosition }) => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
     const sess = sessions.get(token);
@@ -517,7 +631,7 @@ io.on('connection', (socket) => {
     if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
     const gp = room.gamePlayers.get(token);
     if (!gp || !gp.isAlive) return;
-    activatePower(io, room.roomCode, gp, room.gamePlayers, targetId);
+    activatePower(io, room.roomCode, gp, room.gamePlayers, targetId, room.mazeSnapshot ?? undefined, wallPosition, room.currentEra, teleportPosition);
   });
 
   // --- Power Deactivate ---
@@ -531,7 +645,20 @@ io.on('connection', (socket) => {
     if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
     const gp = room.gamePlayers.get(token);
     if (!gp) return;
-    deactivatePower(io, room.roomCode, gp, room.gamePlayers);
+    deactivatePower(io, room.roomCode, gp, room.gamePlayers, room.mazeSnapshot ?? undefined);
+  });
+
+  // --- Kill Attempt (shadow tries to eliminate a player) ---
+  socket.on('kill:attempt', ({ targetId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive) return;
+    attemptKill(io, room.roomCode, gp, room.gamePlayers, targetId, DEFAULT_GAME_SETTINGS.killCooldown);
   });
 
   // --- Mind Control Input (arrow keys for controlling another player) ---
@@ -554,8 +681,297 @@ io.on('connection', (socket) => {
     };
   });
 
+  // --- Mind Control: Activate controlled player's power (E key) ---
+  socket.on('mind-control:activate-power', () => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.powerActive || gp.power !== 'mind_controller' || !gp.mindControlTargetToken) return;
+
+    const targetGp = room.gamePlayers.get(gp.mindControlTargetToken);
+    if (!targetGp || !targetGp.isAlive) return;
+
+    activatePower(io, room.roomCode, targetGp, room.gamePlayers, undefined, room.mazeSnapshot ?? undefined);
+  });
+
+  // --- Door Interact (player presses E near a door) ---
+  socket.on('door:interact', ({ doorId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess) return;
+    if (!sess.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeLayout || !room.mazeSnapshot) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive) return;
+    interactDoor(gp, doorId, room.mazeLayout, room.mazeSnapshot);
+  });
+
+  // --- Oxygen Refill (player interacts with an oxygen generator) ---
+  socket.on('oxygen:start-refill', ({ generatorId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeLayout) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive) return;
+
+    // Check generator exists
+    const gen = room.mazeLayout.oxygenGenerators?.find(g => g.id === generatorId);
+    if (!gen) return;
+
+    // Check proximity
+    const dx = gp.position[0] - gen.position[0];
+    const dz = gp.position[2] - gen.position[2];
+    if (dx * dx + dz * dz > 3.5 * 3.5) return;
+
+    // Check no one else is already refilling
+    for (const [, otherGp] of room.gamePlayers) {
+      if (otherGp.socketId !== socket.id && otherGp.oxygenRefillGeneratorId) return;
+    }
+
+    gp.oxygenRefillGeneratorId = generatorId;
+    gp.oxygenRefillStartTime = Date.now();
+  });
+
+  socket.on('oxygen:cancel-refill', () => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp) return;
+
+    gp.oxygenRefillGeneratorId = null;
+    gp.oxygenRefillStartTime = 0;
+  });
+
+  socket.on('oxygen:complete-refill', ({ generatorId }) => {
+    // Completion is handled server-side in the game loop (after OXYGEN_REFILL_DURATION)
+    // This event is a no-op safety valve
+  });
+
+  // --- Task Interact (player interacts with a task station) ---
+  socket.on('task:start', ({ taskId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeLayout || !room.mazeSnapshot) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive) return;
+    const result = startTask(gp, taskId, room.mazeLayout, room.mazeSnapshot);
+    if (result.ok) {
+      io.to(room.roomCode).emit('task:started', { taskId, playerId: gp.socketId });
+    } else {
+      socket.emit('task:start-failed', { taskId, reason: result.reason });
+    }
+  });
+
+  socket.on('task:complete', ({ taskId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeSnapshot) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive) return;
+    if (completeTask(gp, taskId, room.mazeSnapshot)) {
+      io.to(room.roomCode).emit('task:completed', { taskId, playerId: gp.socketId });
+    } else {
+      // Safety: clear activeTaskId to prevent cascading failures
+      gp.activeTaskId = null;
+    }
+  });
+
+  socket.on('task:cancel', ({ taskId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeSnapshot) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp) return;
+    if (cancelTask(gp, taskId, room.mazeSnapshot)) {
+      io.to(room.roomCode).emit('task:cancelled', { taskId, playerId: gp.socketId });
+    }
+    // Always clear activeTaskId to prevent cascading failures
+    gp.activeTaskId = null;
+  });
+
+  // --- Ghost: Possess a player's body (20s, 30s cooldown) ---
+  socket.on('ghost:possess', ({ targetId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isGhost) return;
+
+    const now = Date.now();
+    if (now < gp.ghostPossessCooldownEnd) return;
+
+    // Find target by socket ID
+    const targetToken = findSessionTokenBySocketId(targetId);
+    if (!targetToken) return;
+    const targetGp = room.gamePlayers.get(targetToken);
+    if (!targetGp || !targetGp.isAlive) return;
+
+    gp.ghostPossessTargetToken = targetToken;
+    gp.ghostPossessEnd = now + 20_000;
+    gp.ghostPossessCooldownEnd = now + 20_000 + 30_000;
+  });
+
+  // --- Ghost: Release possession early ---
+  socket.on('ghost:release-possess', () => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isGhost) return;
+    gp.ghostPossessTargetToken = null;
+    gp.ghostPossessInput = null;
+  });
+
+  // --- Ghost: Send input for possessed player ---
+  socket.on('ghost:possess-input', (data) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isGhost || !gp.ghostPossessTargetToken) return;
+    gp.ghostPossessInput = {
+      forward: data.forward,
+      backward: data.backward,
+      left: data.left,
+      right: data.right,
+      mouseX: data.mouseX,
+    };
+  });
+
+  // --- Ghost: Toggle light (no hacker power needed) ---
+  socket.on('ghost:toggle-light', ({ lightId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.mazeSnapshot) return;
+    const gp = room.gamePlayers?.get(token);
+    if (!gp || !gp.isGhost) return;
+    if (room.mazeSnapshot.lightStates[lightId] !== undefined) {
+      room.mazeSnapshot.lightStates[lightId] = !room.mazeSnapshot.lightStates[lightId];
+    }
+  });
+
+  // --- Ghost: Start task (any task, no assignment/proximity check) ---
+  socket.on('ghost:task-start', ({ taskId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeLayout || !room.mazeSnapshot) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isGhost) return;
+    if (ghostStartTask(gp, taskId, room.mazeLayout, room.mazeSnapshot)) {
+      io.to(room.roomCode).emit('task:started', { taskId, playerId: gp.socketId });
+    }
+  });
+
+  // --- Ghost: Complete task ---
+  socket.on('ghost:task-complete', ({ taskId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeSnapshot) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isGhost) return;
+    if (completeTask(gp, taskId, room.mazeSnapshot)) {
+      io.to(room.roomCode).emit('task:completed', { taskId, playerId: gp.socketId });
+    }
+  });
+
+  // --- Ghost: Cancel task ---
+  socket.on('ghost:task-cancel', ({ taskId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeSnapshot) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isGhost) return;
+    if (cancelTask(gp, taskId, room.mazeSnapshot)) {
+      io.to(room.roomCode).emit('task:cancelled', { taskId, playerId: gp.socketId });
+    }
+  });
+
+  // --- Hacker Action (lock door / toggle light) ---
+  socket.on('hacker:action', ({ targetType, targetId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess) return;
+    if (!sess.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeSnapshot) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive || !gp.powerActive || gp.power !== PowerType.HACKER) return;
+
+    if (targetType === 'door') {
+      const doorState = room.mazeSnapshot.doorStates[targetId];
+      if (!doorState) return;
+      // Toggle lock
+      if (doorState.isLocked && doorState.lockedBy === gp.socketId) {
+        doorState.isLocked = false;
+        doorState.isOpen = false;
+        doorState.lockedBy = null;
+        gp.hackerLockedDoors = gp.hackerLockedDoors.filter(id => id !== targetId);
+      } else if (!doorState.isLocked) {
+        doorState.isLocked = true;
+        doorState.isOpen = false;
+        doorState.lockedBy = gp.socketId;
+        gp.hackerLockedDoors.push(targetId);
+      }
+    }
+
+    if (targetType === 'light') {
+      if (room.mazeSnapshot.lightStates[targetId] !== undefined) {
+        room.mazeSnapshot.lightStates[targetId] = !room.mazeSnapshot.lightStates[targetId];
+        if (!room.mazeSnapshot.lightStates[targetId]) {
+          gp.hackerToggledLights.push(targetId);
+        } else {
+          gp.hackerToggledLights = gp.hackerToggledLights.filter(id => id !== targetId);
+        }
+      }
+    }
+  });
+
   // --- Start Game (host only) ---
-  socket.on('game:start', () => {
+  socket.on('game:start', async () => {
     const token = socketToSession.get(socket.id);
     if (!token) return;
     const sess = sessions.get(token);
@@ -569,6 +985,9 @@ io.on('connection', (socket) => {
     for (const [, player] of room.players) {
       if (!player.ready) return;
     }
+
+    // Generate cosmic scenario via Gemini AI
+    const cosmicScenario = await generateCosmicScenario();
 
     // Assign roles
     const playerTokens = Array.from(room.players.keys());
@@ -587,6 +1006,40 @@ io.on('connection', (socket) => {
       '#fd79a8', '#ffeaa7', '#dfe6e9', '#636e72', '#b2bec3',
     ];
 
+    // Generate maze
+    const mazeSeed = Math.floor(Math.random() * 2147483647);
+    const mazeLayout = generateMaze(mazeSeed, playerTokens.length);
+    const mazeSnapshot = createInitialMazeSnapshot(mazeLayout);
+
+    // Assign tasks per player (crew gets real tasks, shadows get fake tasks)
+    const TASKS_PER_PLAYER = 5;
+    const allTaskIds = mazeLayout.tasks.map((t) => t.id);
+    const shuffledTaskIds = [...allTaskIds].sort(() => Math.random() - 0.5);
+
+    // Count crew members to distribute tasks
+    const crewTokens = playerTokens.filter((t) => !shadowTokens.has(t));
+    const crewCount = crewTokens.length;
+    // Each crew member gets up to TASKS_PER_PLAYER, cycling through all tasks
+    const taskAssignments = new Map<string, string[]>();
+    let taskCursor = 0;
+    for (const cToken of crewTokens) {
+      const assigned: string[] = [];
+      for (let i = 0; i < TASKS_PER_PLAYER && i < allTaskIds.length; i++) {
+        assigned.push(shuffledTaskIds[taskCursor % shuffledTaskIds.length]);
+        taskCursor++;
+      }
+      taskAssignments.set(cToken, assigned);
+    }
+    // Shadows get fake tasks (random subset, same count, for blending in)
+    for (const sToken of shuffled.slice(0, shadowCount)) {
+      const fakeAssigned: string[] = [];
+      const shadowShuffled = [...allTaskIds].sort(() => Math.random() - 0.5);
+      for (let i = 0; i < TASKS_PER_PLAYER && i < shadowShuffled.length; i++) {
+        fakeAssigned.push(shadowShuffled[i]);
+      }
+      taskAssignments.set(sToken, fakeAssigned);
+    }
+
     // Build game player states and player info map
     const gamePlayers = new Map<string, GamePlayerState>();
     const playerInfo: Record<string, { name: string; color: string }> = {};
@@ -600,7 +1053,7 @@ io.on('connection', (socket) => {
 
       const isShadow = shadowTokens.has(pToken);
       const angle = (idx / totalPlayers) * Math.PI * 2;
-      const color = PLAYER_COLORS[idx % PLAYER_COLORS.length];
+      const color = pData.color;
       const power = shuffledPowers[idx % shuffledPowers.length];
 
       const gp: GamePlayerState = {
@@ -620,17 +1073,40 @@ io.on('connection', (socket) => {
         isHidden: false,
         isInvisible: false,
         hasShield: false,
+        isImpermeable: false,
+        activeTaskId: null,
+        assignedTasks: taskAssignments.get(pToken) ?? [],
         speedMultiplier: 1,
         lastProcessedInput: 0,
         inputQueue: [],
         powerActive: false,
         powerActiveEnd: 0,
         powerCooldownEnd: 0,
-        powerUsesLeft: 1,
+        powerUsesLeft: POWER_CONFIGS[power]?.usesPerMatch ?? 1,
         mindControlTargetToken: null,
         mindControlInput: null,
         baseSpeedMultiplier: 1,
         originalColor: color,
+        originalPower: power,
+        isMetamorphed: false,
+        metamorphEndTime: 0,
+        hackerLockedDoors: [],
+        hackerToggledLights: [],
+        muralhaWallActive: false,
+        muralhaWall: null,
+        health: MAX_HEALTH,
+        maxHealth: MAX_HEALTH,
+        damageSource: 'none',
+        inShelter: false,
+        doorProtection: false,
+        isGhost: false,
+        ghostPossessTargetToken: null,
+        ghostPossessInput: null,
+        ghostPossessEnd: 0,
+        ghostPossessCooldownEnd: 0,
+        oxygenRefillGeneratorId: null,
+        oxygenRefillStartTime: 0,
+        killCooldownEnd: 0,
       };
 
       gamePlayers.set(pToken, gp);
@@ -638,8 +1114,12 @@ io.on('connection', (socket) => {
       idx++;
     }
 
-    room.phase = 'playing';
+    room.phase = 'loading';
     room.gamePlayers = gamePlayers;
+    room.mazeLayout = mazeLayout;
+    room.mazeSnapshot = mazeSnapshot;
+    room.cosmicScenario = cosmicScenario;
+    room.loadedPlayers = new Set();
 
     // Emit to each player individually (they only learn their own role)
     for (const [pToken, gp] of gamePlayers) {
@@ -651,15 +1131,18 @@ io.on('connection', (socket) => {
           role: gp.role,
           power: gp.power as PowerType,
           playerInfo,
+          mazeLayout,
+          cosmicScenario,
+          assignedTasks: gp.assignedTasks,
         });
       }
     }
 
-    io.to(room.roomCode).emit('game:phase-change', { phase: 'playing' });
+    // Tell all clients to enter loading phase (NOT playing yet)
+    io.to(room.roomCode).emit('game:phase-change', { phase: 'loading' });
+    io.to(room.roomCode).emit('game:loading-progress', { loadedPlayerIds: [], totalPlayers });
 
-    // Start game loop
-    room.gameTickInterval = startGameLoop(io, room.roomCode, gamePlayers);
-    console.log(`[Server] Game started in room ${room.roomCode} (${totalPlayers} players, ${shadowCount} shadow(s))`);
+    console.log(`[Server] Game loading in room ${room.roomCode} (${totalPlayers} players, ${shadowCount} shadow(s), scenario: "${cosmicScenario.theme}") — waiting for all clients to load...`);
   });
 
   // --- Kick Player (host only) ---
