@@ -24,7 +24,6 @@ const PIPE_GLOW_DIM = '#005533';
 const RIB_SPACING = 2.5;
 const RIB_INNER_RADIUS = TUNNEL_RADIUS - 0.02;
 const RIB_OUTER_RADIUS = TUNNEL_RADIUS + 0.08;
-const RIB_WIDTH = 0.12;
 
 // Module-level reusable objects
 const _mat4 = new THREE.Matrix4();
