@@ -17,7 +17,7 @@ import type {
 } from '@shadow/shared';
 import { DEFAULT_GAME_SETTINGS, PowerType, POWER_CONFIGS, generateMaze, createInitialMazeSnapshot } from '@shadow/shared';
 import type { CosmicScenario } from '@shadow/shared';
-import { startGameLoop, activatePower, deactivatePower, findNearbyPlayers, attemptKill, interactDoor, startTask, completeTask, cancelTask, ghostStartTask, MAX_HEALTH, type GamePlayerState } from './game/game-loop.js';
+import { startGameLoop, activatePower, deactivatePower, findNearbyPlayers, attemptKill, interactDoor, startTask, completeTask, cancelTask, ghostStartTask, checkGameOver, createDeadBody, MAX_HEALTH, type GamePlayerState, type DeadBody } from './game/game-loop.js';
 import { generateCosmicScenario } from './services/gemini.js';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
@@ -55,6 +55,18 @@ const PLAYER_COLORS = [
   '#fd79a8', '#ffeaa7', '#dfe6e9', '#636e72', '#b2bec3',
 ];
 
+interface MeetingState {
+  reporterId: string;       // socketId who reported
+  reportedBodyId: string | null;
+  phase: 'discussion' | 'voting';
+  phaseEndTime: number;
+  votes: Map<string, string | null>;  // socketId -> targetSocketId | null (skip)
+  preMeetingPositions: Map<string, [number, number, number]>;
+  alivePlayers: Set<string>;  // socketIds of alive players at meeting start
+  discussionTimer: ReturnType<typeof setTimeout> | null;
+  votingTimer: ReturnType<typeof setTimeout> | null;
+}
+
 interface RoomData {
   roomCode: string;
   hostId: string;
@@ -71,6 +83,10 @@ interface RoomData {
   cosmicScenario: CosmicScenario | null;
   loadedPlayers: Set<string>;
   currentEra: string;
+  gameStartTime: number | null;
+  endedGameRoles: Record<string, { name: string; color: string; role: string }> | null;
+  deadBodies: Map<string, DeadBody>;
+  meetingState: MeetingState | null;
 }
 
 const rooms = new Map<string, RoomData>();
@@ -171,6 +187,353 @@ function buildGameState(room: RoomData) {
   };
 }
 
+// ===== Game End Logic =====
+
+function endGame(room: RoomData, winner: 'crew' | 'shadow', reason: string) {
+  if (room.phase === 'lobby') return;
+
+  // Stop game loop
+  if (room.gameTickInterval) {
+    clearInterval(room.gameTickInterval);
+    room.gameTickInterval = null;
+  }
+
+  // Build roles reveal from active gamePlayers + endedGameRoles (players who left mid-game)
+  const roles: Record<string, { name: string; color: string; role: string }> = {};
+  if (room.gamePlayers) {
+    for (const [, gp] of room.gamePlayers) {
+      roles[gp.socketId] = { name: gp.name, color: gp.color, role: gp.role };
+    }
+  }
+  if (room.endedGameRoles) {
+    Object.assign(roles, room.endedGameRoles);
+  }
+
+  // Build stats
+  let tasksCompleted = 0;
+  let totalTasks = 0;
+  if (room.mazeSnapshot) {
+    const taskStates = Object.values(room.mazeSnapshot.taskStates);
+    totalTasks = taskStates.length;
+    tasksCompleted = taskStates.filter(t => t.completionState === 'completed').length;
+  }
+  const gameDurationSec = room.gameStartTime
+    ? Math.round((Date.now() - room.gameStartTime) / 1000)
+    : 0;
+
+  // Emit game ended to ALL players in the room (including lobby-waiters)
+  io.to(room.roomCode).emit('game:ended', {
+    winner,
+    reason,
+    roles,
+    stats: { tasksCompleted, totalTasks, gameDurationSec },
+  });
+
+  // Clear meeting timers
+  if (room.meetingState) {
+    if (room.meetingState.discussionTimer) clearTimeout(room.meetingState.discussionTimer);
+    if (room.meetingState.votingTimer) clearTimeout(room.meetingState.votingTimer);
+    room.meetingState = null;
+  }
+
+  // Reset room to lobby phase
+  room.phase = 'lobby';
+  room.gamePlayers = null;
+  room.mazeLayout = null;
+  room.mazeSnapshot = null;
+  room.cosmicScenario = null;
+  room.loadedPlayers = new Set();
+  room.gameStartTime = null;
+  room.endedGameRoles = null;
+  room.deadBodies = new Map();
+
+  // Reset all player ready states
+  for (const [, playerData] of room.players) {
+    playerData.ready = false;
+  }
+
+  console.log(`[Server] Game ended in room ${room.roomCode}: ${winner} wins (${reason})`);
+}
+
+function checkGameEndConditions(room: RoomData) {
+  if (room.phase !== 'playing' || !room.gamePlayers) return;
+
+  const players = Array.from(room.gamePlayers.values());
+
+  // No active players left
+  if (players.length === 0) {
+    endGame(room, 'shadow', 'all_left');
+    return;
+  }
+
+  const aliveCrew = players.filter(p => p.role === 'crew' && p.isAlive);
+  const aliveShadows = players.filter(p => p.role === 'shadow' && p.isAlive);
+
+  // All crew dead — shadows win
+  if (aliveCrew.length === 0) {
+    endGame(room, 'shadow', 'all_crew_dead');
+    return;
+  }
+
+  // All shadows eliminated — crew wins
+  if (aliveShadows.length === 0) {
+    endGame(room, 'crew', 'shadow_eliminated');
+    return;
+  }
+
+  // All tasks completed — crew wins
+  if (room.mazeSnapshot) {
+    const taskStates = Object.values(room.mazeSnapshot.taskStates);
+    if (taskStates.length > 0 && taskStates.every(t => t.completionState === 'completed')) {
+      endGame(room, 'crew', 'all_tasks_done');
+      return;
+    }
+  }
+}
+
+// ===== Meeting System =====
+
+function triggerMeeting(room: RoomData, reporterId: string, bodyId: string | null) {
+  if (!room.gamePlayers || room.phase !== 'playing') return;
+
+  // Stop game loop
+  if (room.gameTickInterval) {
+    clearInterval(room.gameTickInterval);
+    room.gameTickInterval = null;
+  }
+
+  // Save pre-meeting positions & collect alive players
+  const preMeetingPositions = new Map<string, [number, number, number]>();
+  const alivePlayers = new Set<string>();
+  for (const [, gp] of room.gamePlayers) {
+    if (gp.isAlive) {
+      preMeetingPositions.set(gp.socketId, [...gp.position]);
+      alivePlayers.add(gp.socketId);
+    }
+    // Cancel any active tasks
+    if (gp.activeTaskId) {
+      gp.activeTaskId = null;
+    }
+    // Cancel oxygen refill
+    gp.oxygenRefillGeneratorId = null;
+    gp.oxygenRefillStartTime = 0;
+  }
+
+  // Teleport alive players in circle around center table
+  const aliveList = Array.from(alivePlayers);
+  const spawnRadius = 4;
+  for (let i = 0; i < aliveList.length; i++) {
+    const angle = (i / aliveList.length) * Math.PI * 2;
+    for (const [, gp] of room.gamePlayers) {
+      if (gp.socketId === aliveList[i]) {
+        gp.position = [
+          Math.cos(angle) * spawnRadius,
+          0,
+          Math.sin(angle) * spawnRadius,
+        ];
+        // Exit underground if in pipes
+        gp.isUnderground = false;
+        gp.currentPipeNodeId = null;
+        break;
+      }
+    }
+  }
+
+  // Mark reported body
+  if (bodyId) {
+    const body = room.deadBodies.get(bodyId);
+    if (body) body.reported = true;
+  }
+
+  const discussionTime = DEFAULT_GAME_SETTINGS.discussionTime;
+  const now = Date.now();
+
+  room.phase = 'meeting';
+  room.meetingState = {
+    reporterId,
+    reportedBodyId: bodyId,
+    phase: 'discussion',
+    phaseEndTime: now + discussionTime,
+    votes: new Map(),
+    preMeetingPositions,
+    alivePlayers,
+    discussionTimer: null,
+    votingTimer: null,
+  };
+
+  io.to(room.roomCode).emit('meeting:started', { reporterId, bodyId: bodyId ?? undefined });
+  io.to(room.roomCode).emit('game:phase-change', { phase: 'meeting' });
+
+  // Transition to voting after discussion time
+  room.meetingState.discussionTimer = setTimeout(() => {
+    transitionToVoting(room);
+  }, discussionTime);
+
+  console.log(`[Meeting] Meeting triggered in room ${room.roomCode} by ${reporterId} (bodyId: ${bodyId})`);
+}
+
+function transitionToVoting(room: RoomData) {
+  if (!room.meetingState || room.phase !== 'meeting') return;
+
+  const votingTime = DEFAULT_GAME_SETTINGS.votingTime;
+  const now = Date.now();
+
+  room.meetingState.phase = 'voting';
+  room.meetingState.phaseEndTime = now + votingTime;
+
+  io.to(room.roomCode).emit('meeting:voting-phase');
+
+  // End meeting after voting time
+  room.meetingState.votingTimer = setTimeout(() => {
+    endMeeting(room);
+  }, votingTime);
+
+  console.log(`[Meeting] Voting phase started in room ${room.roomCode}`);
+}
+
+function endMeeting(room: RoomData) {
+  if (!room.meetingState || !room.gamePlayers) return;
+
+  const ms = room.meetingState;
+
+  // Count votes
+  const voteCounts = new Map<string, number>(); // targetSocketId -> count (null = skip)
+  const skipKey = '__skip__';
+  for (const [, targetId] of ms.votes) {
+    const key = targetId ?? skipKey;
+    voteCounts.set(key, (voteCounts.get(key) ?? 0) + 1);
+  }
+
+  // Add implicit skip votes from players who didn't vote
+  for (const playerId of ms.alivePlayers) {
+    if (!ms.votes.has(playerId)) {
+      voteCounts.set(skipKey, (voteCounts.get(skipKey) ?? 0) + 1);
+    }
+  }
+
+  // Find the most voted (tie = skip)
+  let maxVotes = 0;
+  let ejectedId: string | null = null;
+  let tie = false;
+  for (const [targetId, count] of voteCounts) {
+    if (targetId === skipKey) continue;
+    if (count > maxVotes) {
+      maxVotes = count;
+      ejectedId = targetId;
+      tie = false;
+    } else if (count === maxVotes) {
+      tie = true;
+    }
+  }
+
+  // Check if skip votes exceed the max voted player
+  const skipVotes = voteCounts.get(skipKey) ?? 0;
+  if (skipVotes >= maxVotes || tie) {
+    ejectedId = null; // No one ejected
+  }
+
+  // Eject player
+  if (ejectedId) {
+    for (const [, gp] of room.gamePlayers) {
+      if (gp.socketId === ejectedId) {
+        gp.isAlive = false;
+        gp.isGhost = true;
+        gp.health = 0;
+        io.to(gp.socketId).emit('ghost:death-screen', { cause: 'ejected', killerId: null });
+        break;
+      }
+    }
+  }
+
+  // Convert votes to serializable format
+  const votesRecord: Record<string, string | null> = {};
+  for (const [voterId, targetId] of ms.votes) {
+    votesRecord[voterId] = targetId;
+  }
+
+  io.to(room.roomCode).emit('vote:result', { ejectedId, votes: votesRecord });
+
+  console.log(`[Meeting] Meeting ended in room ${room.roomCode}. Ejected: ${ejectedId ?? 'nobody'}`);
+
+  // Resume game after 5 seconds (result display time)
+  setTimeout(() => {
+    resumeGame(room);
+  }, 5000);
+}
+
+function resumeGame(room: RoomData) {
+  if (!room.gamePlayers || !room.mazeLayout || !room.mazeSnapshot || !room.cosmicScenario) return;
+
+  const ms = room.meetingState;
+
+  // Restore pre-meeting positions for alive players
+  if (ms) {
+    for (const [, gp] of room.gamePlayers) {
+      if (gp.isAlive) {
+        const savedPos = ms.preMeetingPositions.get(gp.socketId);
+        if (savedPos) {
+          gp.position = [...savedPos];
+        }
+      }
+    }
+    // Clean up meeting timers
+    if (ms.discussionTimer) clearTimeout(ms.discussionTimer);
+    if (ms.votingTimer) clearTimeout(ms.votingTimer);
+  }
+
+  room.meetingState = null;
+  room.phase = 'playing';
+  io.to(room.roomCode).emit('game:phase-change', { phase: 'playing' });
+
+  // Check game over conditions after ejection
+  const result = checkGameOver(room.gamePlayers, room.mazeSnapshot);
+  if (result.gameOver && result.winner && result.reason) {
+    endGame(room, result.winner, result.reason);
+    return;
+  }
+
+  // Restart game loop
+  room.gameTickInterval = startGameLoop(
+    io, room.roomCode, room.gamePlayers, room.mazeLayout, room.mazeSnapshot,
+    room.cosmicScenario, room.deadBodies,
+    (era) => { room.currentEra = era; },
+    () => { checkGameEndConditions(room); },
+  );
+
+  console.log(`[Meeting] Game resumed in room ${room.roomCode}`);
+}
+
+function returnPlayerToLobby(room: RoomData, sessionToken: string, gp: GamePlayerState, sock: ReturnType<typeof io.sockets.sockets.get>) {
+  if (!sock) return;
+
+  // Track role for end-game reveal
+  if (!room.endedGameRoles) room.endedGameRoles = {};
+  room.endedGameRoles[gp.socketId] = { name: gp.name, color: gp.color, role: gp.role };
+
+  // Remove from active game players
+  room.gamePlayers!.delete(sessionToken);
+
+  // Reset ready state
+  const playerData = room.players.get(sessionToken);
+  if (playerData) {
+    playerData.ready = false;
+  }
+
+  // Send this player back to lobby view
+  sock.emit('game:phase-change', { phase: 'lobby' });
+  sock.emit('room:joined', {
+    gameState: buildGameState(room),
+    lobbyPlayers: buildLobbyPlayers(room),
+  });
+
+  // Notify everyone in the room
+  io.to(room.roomCode).emit('game:player-returned-to-lobby', { playerName: gp.name });
+  broadcastPlayerList(room);
+
+  // Check if game should end
+  checkGameEndConditions(room);
+}
+
 function removePlayerFromRoom(sessionToken: string) {
   const session = sessions.get(sessionToken);
   if (!session || !session.roomCode) return;
@@ -185,6 +548,16 @@ function removePlayerFromRoom(sessionToken: string) {
   const removedPlayerName = room.players.get(sessionToken)?.name;
   room.players.delete(sessionToken);
 
+  // If a game is active, remove from gamePlayers and track role
+  if (room.gamePlayers) {
+    const gp = room.gamePlayers.get(sessionToken);
+    if (gp) {
+      if (!room.endedGameRoles) room.endedGameRoles = {};
+      room.endedGameRoles[gp.socketId] = { name: gp.name, color: gp.color, role: gp.role };
+      room.gamePlayers.delete(sessionToken);
+    }
+  }
+
   // Notify others
   const sockId = session.socketId;
   const sock = io.sockets.sockets.get(sockId);
@@ -197,6 +570,11 @@ function removePlayerFromRoom(sessionToken: string) {
   }
 
   if (room.players.size === 0) {
+    // Clean up game loop before deleting room
+    if (room.gameTickInterval) {
+      clearInterval(room.gameTickInterval);
+      room.gameTickInterval = null;
+    }
     rooms.delete(roomCode);
     console.log(`[Server] Room ${roomCode} deleted (empty)`);
   } else {
@@ -221,6 +599,8 @@ function removePlayerFromRoom(sessionToken: string) {
       }
     }
     broadcastPlayerList(room);
+    // Check if game should end after player removal
+    checkGameEndConditions(room);
   }
 }
 
@@ -340,6 +720,10 @@ io.on('connection', (socket) => {
       cosmicScenario: null,
       loadedPlayers: new Set(),
       currentEra: 'stable',
+      gameStartTime: null,
+      endedGameRoles: null,
+      deadBodies: new Map(),
+      meetingState: null,
     };
 
     rooms.set(roomCode, room);
@@ -530,7 +914,7 @@ io.on('connection', (socket) => {
       io.to(room.roomCode).emit('game:phase-change', { phase: 'playing' });
 
       // Start game loop now that everyone is ready
-      room.gameTickInterval = startGameLoop(io, room.roomCode, room.gamePlayers, room.mazeLayout!, room.mazeSnapshot!, room.cosmicScenario!, (era) => { room.currentEra = era; });
+      room.gameTickInterval = startGameLoop(io, room.roomCode, room.gamePlayers, room.mazeLayout!, room.mazeSnapshot!, room.cosmicScenario!, room.deadBodies, (era) => { room.currentEra = era; }, () => { checkGameEndConditions(room); });
       console.log(`[Server] All players loaded — game started in room ${room.roomCode}`);
     }
   });
@@ -658,7 +1042,120 @@ io.on('connection', (socket) => {
     if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
     const gp = room.gamePlayers.get(token);
     if (!gp || !gp.isAlive) return;
-    attemptKill(io, room.roomCode, gp, room.gamePlayers, targetId, DEFAULT_GAME_SETTINGS.killCooldown);
+    attemptKill(io, room.roomCode, gp, room.gamePlayers, targetId, DEFAULT_GAME_SETTINGS.killCooldown, room.deadBodies);
+  });
+
+  // --- Body Report (player reports a dead body) ---
+  socket.on('body:report', ({ bodyId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive || gp.isGhost) return;
+
+    // Validate body exists and is not already reported
+    const body = room.deadBodies.get(bodyId);
+    if (!body || body.reported) return;
+
+    // Proximity check (3.0 units)
+    const dx = gp.position[0] - body.position[0];
+    const dz = gp.position[2] - body.position[2];
+    if (dx * dx + dz * dz > 3.0 * 3.0) return;
+
+    triggerMeeting(room, socket.id, bodyId);
+  });
+
+  // --- Emergency Meeting (player presses button at center table) ---
+  socket.on('meeting:emergency', () => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive || gp.isGhost) return;
+
+    const now = Date.now();
+
+    // Cooldown check (30 seconds)
+    if (now < gp.emergencyButtonCooldownEnd) {
+      socket.emit('meeting:emergency-failed', { reason: 'cooldown' });
+      return;
+    }
+
+    // Uses check
+    if (gp.emergencyButtonUsesLeft <= 0) {
+      socket.emit('meeting:emergency-failed', { reason: 'no_uses' });
+      return;
+    }
+
+    // Proximity check to center (3.5 units)
+    const dx = gp.position[0];
+    const dz = gp.position[2];
+    if (dx * dx + dz * dz > 3.5 * 3.5) {
+      socket.emit('meeting:emergency-failed', { reason: 'too_far' });
+      return;
+    }
+
+    gp.emergencyButtonUsesLeft--;
+    gp.emergencyButtonCooldownEnd = now + 30000;
+
+    triggerMeeting(room, socket.id, null);
+  });
+
+  // --- Vote Cast (player votes during meeting) ---
+  socket.on('vote:cast', ({ targetId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'meeting' || !room.gamePlayers || !room.meetingState) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive) return;
+
+    const ms = room.meetingState;
+    if (ms.phase !== 'voting') return;
+
+    // Already voted
+    if (ms.votes.has(socket.id)) return;
+
+    // Validate target (null = skip, otherwise must be alive)
+    if (targetId !== null) {
+      let validTarget = false;
+      for (const [, tgp] of room.gamePlayers) {
+        if (tgp.socketId === targetId && tgp.isAlive) {
+          validTarget = true;
+          break;
+        }
+      }
+      if (!validTarget) return;
+    }
+
+    ms.votes.set(socket.id, targetId);
+    socket.emit('vote:confirmed');
+
+    // Check if all alive players have voted — end voting early
+    let allVoted = true;
+    for (const playerId of ms.alivePlayers) {
+      if (!ms.votes.has(playerId)) {
+        allVoted = false;
+        break;
+      }
+    }
+
+    if (allVoted) {
+      // Cancel the voting timeout
+      if (ms.votingTimer) {
+        clearTimeout(ms.votingTimer);
+        ms.votingTimer = null;
+      }
+      endMeeting(room);
+    }
   });
 
   // --- Mind Control Input (arrow keys for controlling another player) ---
@@ -929,6 +1426,103 @@ io.on('connection', (socket) => {
     }
   });
 
+  // --- Death Choice (ghost, lobby, leave) ---
+  socket.on('death:choice', ({ choice }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || !room.gamePlayers) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || gp.isAlive) return; // Only dead players can choose
+
+    switch (choice) {
+      case 'ghost':
+        // Already a ghost — nothing to do server-side
+        break;
+      case 'lobby':
+        returnPlayerToLobby(room, token, gp, socket);
+        break;
+      case 'leave':
+        removePlayerFromRoom(token);
+        break;
+    }
+  });
+
+  // --- Pipe: Enter underground pipe network ---
+  socket.on('pipe:enter', ({ pipeNodeId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeLayout) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive || gp.isUnderground) return;
+
+    // Find the pipe node
+    const pipeNode = room.mazeLayout.pipeNodes?.find(p => p.id === pipeNodeId);
+    if (!pipeNode) return;
+
+    // Check proximity to pipe entrance (surface)
+    const dx = gp.position[0] - pipeNode.surfacePosition[0];
+    const dz = gp.position[2] - pipeNode.surfacePosition[2];
+    if (dx * dx + dz * dz > 4 * 4) return; // Must be within 4 units
+
+    // Teleport to underground position
+    gp.position = [...pipeNode.undergroundPosition];
+    gp.isUnderground = true;
+    gp.currentPipeNodeId = pipeNodeId;
+    console.log(`[PIPE] ${gp.name} entered pipe at ${pipeNode.roomName}`);
+  });
+
+  // --- Pipe: Exit underground pipe network ---
+  socket.on('pipe:exit', ({ pipeNodeId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeLayout) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive || !gp.isUnderground) return;
+
+    // Find the pipe node
+    const pipeNode = room.mazeLayout.pipeNodes?.find(p => p.id === pipeNodeId);
+    if (!pipeNode) return;
+
+    // Check proximity to underground exit
+    const dx = gp.position[0] - pipeNode.undergroundPosition[0];
+    const dz = gp.position[2] - pipeNode.undergroundPosition[2];
+    if (dx * dx + dz * dz > 4 * 4) return; // Must be within 4 units
+
+    // Teleport to surface position
+    gp.position = [...pipeNode.surfacePosition];
+    gp.isUnderground = false;
+    gp.currentPipeNodeId = null;
+    console.log(`[PIPE] ${gp.name} exited pipe at ${pipeNode.roomName}`);
+  });
+
+  // --- Pipe: Fast-travel underground to another node ---
+  socket.on('pipe:travel', ({ destinationNodeId }) => {
+    const token = socketToSession.get(socket.id);
+    if (!token) return;
+    const sess = sessions.get(token);
+    if (!sess?.roomCode) return;
+    const room = rooms.get(sess.roomCode);
+    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeLayout) return;
+    const gp = room.gamePlayers.get(token);
+    if (!gp || !gp.isAlive || !gp.isUnderground) return;
+
+    const destNode = room.mazeLayout.pipeNodes?.find(p => p.id === destinationNodeId);
+    if (!destNode) return;
+
+    gp.position = [...destNode.undergroundPosition];
+    gp.currentPipeNodeId = destinationNodeId;
+    console.log(`[PIPE] ${gp.name} traveled to ${destNode.roomName} underground`);
+  });
+
   // --- Hacker Action (lock door / toggle light) ---
   socket.on('hacker:action', ({ targetType, targetId }) => {
     const token = socketToSession.get(socket.id);
@@ -965,6 +1559,20 @@ io.on('connection', (socket) => {
           gp.hackerToggledLights.push(targetId);
         } else {
           gp.hackerToggledLights = gp.hackerToggledLights.filter(id => id !== targetId);
+        }
+      }
+    }
+
+    if (targetType === 'wall') {
+      if (room.mazeSnapshot.dynamicWallStates[targetId] !== undefined) {
+        const wasClosed = room.mazeSnapshot.dynamicWallStates[targetId] !== false;
+        room.mazeSnapshot.dynamicWallStates[targetId] = !wasClosed;
+        if (!wasClosed) {
+          // Was open, now closing — remove from toggled list
+          gp.hackerToggledWalls = gp.hackerToggledWalls.filter(id => id !== targetId);
+        } else {
+          // Was closed, now opening — add to toggled list
+          gp.hackerToggledWalls.push(targetId);
         }
       }
     }
@@ -1092,8 +1700,9 @@ io.on('connection', (socket) => {
         metamorphEndTime: 0,
         hackerLockedDoors: [],
         hackerToggledLights: [],
-        muralhaWallActive: false,
-        muralhaWall: null,
+        hackerToggledWalls: [],
+        muralhaWalls: [],
+        muralhaNextWallId: 0,
         health: MAX_HEALTH,
         maxHealth: MAX_HEALTH,
         damageSource: 'none',
@@ -1107,6 +1716,10 @@ io.on('connection', (socket) => {
         oxygenRefillGeneratorId: null,
         oxygenRefillStartTime: 0,
         killCooldownEnd: 0,
+        isUnderground: false,
+        currentPipeNodeId: null,
+        emergencyButtonCooldownEnd: 0,
+        emergencyButtonUsesLeft: 1,
       };
 
       gamePlayers.set(pToken, gp);
@@ -1120,6 +1733,10 @@ io.on('connection', (socket) => {
     room.mazeSnapshot = mazeSnapshot;
     room.cosmicScenario = cosmicScenario;
     room.loadedPlayers = new Set();
+    room.gameStartTime = Date.now();
+    room.endedGameRoles = null;
+    room.deadBodies = new Map();
+    room.meetingState = null;
 
     // Emit to each player individually (they only learn their own role)
     for (const [pToken, gp] of gamePlayers) {

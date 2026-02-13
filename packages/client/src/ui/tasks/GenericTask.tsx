@@ -103,10 +103,10 @@ export function GenericTask({ onComplete, onCancel }: TaskComponentProps) {
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
       {/* Title */}
       <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-        Terminal de Manuten&ccedil;&atilde;o
+        Maintenance Terminal
       </div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 24 }}>
-        Pressione os bot&otilde;es na ordem correta
+        Press the buttons in the correct order
       </div>
 
       {/* Status area */}
@@ -133,12 +133,12 @@ export function GenericTask({ onComplete, onCancel }: TaskComponentProps) {
         }}
       >
         {wrongClick
-          ? 'Ordem incorreta! Observe a sequ\u00eancia novamente...'
+          ? 'Wrong order! Watch the sequence again...'
           : completed
-            ? 'Sequ\u00eancia completa!'
+            ? 'Sequence complete!'
             : showingSequence
-              ? 'Memorize a sequ\u00eancia...'
-              : `Pressione o bot\u00e3o ${clickProgress + 1} de ${sequence.length}`}
+              ? 'Memorize the sequence...'
+              : `Press button ${clickProgress + 1} of ${sequence.length}`}
       </div>
 
       {/* Progress dots */}

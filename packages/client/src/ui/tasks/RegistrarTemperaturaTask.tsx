@@ -9,8 +9,8 @@ function generateTargetTemp(): number[] {
 export function RegistrarTemperaturaTask({ onComplete, onCancel }: TaskComponentProps) {
   return (
     <MatchTaskBase
-      title="Registrar Temperatura"
-      subtitle="Ajuste o termômetro para a temperatura alvo"
+      title="Log Temperature"
+      subtitle="Adjust the thermometer to the target temperature"
       itemCount={1}
       generateTarget={generateTargetTemp}
       onComplete={onComplete}

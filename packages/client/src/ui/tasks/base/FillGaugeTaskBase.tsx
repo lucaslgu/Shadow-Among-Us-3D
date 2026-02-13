@@ -156,7 +156,7 @@ export function FillGaugeTaskBase({
       </div>
 
       {completed ? (
-        <div style={{ fontSize: 18, fontWeight: 700, color: '#4ade80' }}>Calibração completa!</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: '#4ade80' }}>Calibration complete!</div>
       ) : (
         <button
           onMouseDown={startFilling} onMouseUp={stopFilling} onMouseLeave={stopFilling}
@@ -171,7 +171,7 @@ export function FillGaugeTaskBase({
             cursor: 'pointer', transition: 'all 0.2s',
           }}
         >
-          {filling ? 'Enchendo... solte na zona verde!' : 'Segure para encher'}
+          {filling ? 'Filling... release in the green zone!' : 'Hold to fill'}
         </button>
       )}
     </div>

@@ -86,7 +86,7 @@ export function LoadingScreen() {
           animation: 'loadingPulse 2s ease-in-out infinite',
         }}
       >
-        Carregando ambiente 3D...
+        Loading 3D environment...
       </div>
 
       {/* Progress bar */}
@@ -120,7 +120,7 @@ export function LoadingScreen() {
           marginBottom: 12,
         }}
       >
-        Jogadores prontos: {loadedCount}/{totalPlayers}
+        Players ready: {loadedCount}/{totalPlayers}
       </div>
 
       {/* Player list */}
@@ -200,7 +200,7 @@ export function LoadingScreen() {
           maxWidth: 300,
         }}
       >
-        O jogo inicia quando todos os jogadores terminarem de carregar
+        The game starts when all players finish loading
       </div>
     </div>
   );

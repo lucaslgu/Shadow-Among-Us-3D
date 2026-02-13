@@ -99,10 +99,10 @@ export function AsteroidCannonTask({ onComplete, onCancel }: TaskComponentProps)
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
       {/* Title */}
       <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-        Canh&atilde;o de Asteroides
+        Asteroid Cannon
       </div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 20 }}>
-        Destrua os asteroides! ({destroyed}/{TOTAL_ASTEROIDS})
+        Destroy the asteroids! ({destroyed}/{TOTAL_ASTEROIDS})
       </div>
 
       {/* Score bar */}
@@ -225,7 +225,7 @@ export function AsteroidCannonTask({ onComplete, onCancel }: TaskComponentProps)
               color: '#4ade80',
             }}
           >
-            Todos destruidos!
+            All destroyed!
           </div>
         )}
       </div>

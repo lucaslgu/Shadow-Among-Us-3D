@@ -98,12 +98,12 @@ export function SimonTaskBase({
       {/* Status */}
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16, height: 20 }}>
         {completed
-          ? <span style={{ color: '#4ade80' }}>Sequência correta!</span>
+          ? <span style={{ color: '#4ade80' }}>Correct sequence!</span>
           : error
-            ? <span style={{ color: '#ef4444' }}>Ordem incorreta! Tente novamente</span>
+            ? <span style={{ color: '#ef4444' }}>Wrong order! Try again</span>
             : phase === 'showing'
-              ? <span style={{ color: '#eab308' }}>Memorize a sequência...</span>
-              : <span style={{ color: '#44aaff' }}>Repita a sequência</span>
+              ? <span style={{ color: '#eab308' }}>Memorize the sequence...</span>
+              : <span style={{ color: '#44aaff' }}>Repeat the sequence</span>
         }
       </div>
 

@@ -76,7 +76,7 @@ export function SincronizarMotoresTask({ onComplete }: TaskComponentProps) {
         ctx.fillStyle = '#6b6b8a';
         ctx.font = '12px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(`Motor ${d + 1}`, cx, CANVAS_SIZE - 8);
+        ctx.fillText(`Engine ${d + 1}`, cx, CANVAS_SIZE - 8);
       }
 
       if (!completedRef.current) rafRef.current = requestAnimationFrame(draw);
@@ -137,17 +137,17 @@ export function SincronizarMotoresTask({ onComplete }: TaskComponentProps) {
 
   return (
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Sincronizar Motores</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Sync Engines</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 12 }}>
-        Pressione ESPAÇO quando todas as agulhas estiverem na zona verde
+        Press SPACE when all needles are in the green zone
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: '#44aaff' }}>
-          Sincs: {syncs}/{REQUIRED_SYNCS}
+          Syncs: {syncs}/{REQUIRED_SYNCS}
         </div>
-        {lastResult === 'hit' && <span style={{ color: '#4ade80', fontWeight: 700 }}>Sincronizado!</span>}
-        {lastResult === 'miss' && <span style={{ color: '#ef4444', fontWeight: 700 }}>Fora de sincronia!</span>}
+        {lastResult === 'hit' && <span style={{ color: '#4ade80', fontWeight: 700 }}>Synced!</span>}
+        {lastResult === 'miss' && <span style={{ color: '#ef4444', fontWeight: 700 }}>Out of sync!</span>}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginBottom: 24 }}>
@@ -175,7 +175,7 @@ export function SincronizarMotoresTask({ onComplete }: TaskComponentProps) {
           cursor: completed ? 'default' : 'pointer',
         }}
       >
-        {completed ? 'Motores sincronizados!' : 'ESPAÇO ou clique para sincronizar'}
+        {completed ? 'Engines synced!' : 'SPACE or click to sync'}
       </button>
     </div>
   );

@@ -351,7 +351,7 @@ export function TeleportMapOverlay() {
           marginBottom: 12,
         }}
       >
-        TELEPORT — Clique no destino
+        TELEPORT — Click destination
       </div>
 
       {/* Charges info */}
@@ -380,7 +380,7 @@ export function TeleportMapOverlay() {
           letterSpacing: 1,
         }}
       >
-        [ESC] ou [Q] para cancelar
+        [ESC] or [Q] to cancel
       </div>
     </div>
   );
@@ -403,7 +403,7 @@ function TeleportChargesInfo() {
       }}
     >
       <span style={{ color: s.colors.textMuted, fontFamily: 'monospace', fontSize: 12 }}>
-        Cargas:
+        Charges:
       </span>
       {[0, 1, 2].map((i) => (
         <div

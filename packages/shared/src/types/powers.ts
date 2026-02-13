@@ -32,7 +32,7 @@ export const POWER_CONFIGS: Record<PowerType, PowerConfig> = {
     usesPerMatch: 1,
     requiresTarget: true,
     requiresLocation: false,
-    targetRange: 12,
+    targetRange: 30,
   },
   [PowerType.INVISIBLE]: {
     type: PowerType.INVISIBLE,
@@ -97,11 +97,11 @@ export const POWER_CONFIGS: Record<PowerType, PowerConfig> = {
   },
   [PowerType.MURALHA]: {
     type: PowerType.MURALHA,
-    displayName: 'Muralha',
-    description: 'Create a cement wall where you aim that blocks movement for 30 seconds.',
+    displayName: 'Rampart',
+    description: 'Create up to 4 cement walls where you aim. Each wall blocks movement for 30 seconds. Charges recharge after cooldown.',
     duration: 30000,
     cooldown: 20000,
-    usesPerMatch: 1,
+    usesPerMatch: 4,
     requiresTarget: false,
     requiresLocation: false,
   },
@@ -114,6 +114,6 @@ export const POWER_CONFIGS: Record<PowerType, PowerConfig> = {
     usesPerMatch: 1,
     requiresTarget: true,
     requiresLocation: false,
-    targetRange: 12,
+    targetRange: 30,
   },
 };

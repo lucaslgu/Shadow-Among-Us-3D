@@ -2,9 +2,9 @@ import { useState, useCallback } from 'react';
 import type { TaskComponentProps } from '../TaskOverlay.js';
 
 const STEPS = [
-  { label: 'Puxe a alavanca para a esquerda', icon: '\u2190', buttonText: 'Esquerda' },
-  { label: 'Puxe para baixo', icon: '\u2193', buttonText: 'Baixo' },
-  { label: 'Solte', icon: '\u25CB', buttonText: 'Soltar' },
+  { label: 'Pull the lever to the left', icon: '\u2190', buttonText: 'Left' },
+  { label: 'Pull down', icon: '\u2193', buttonText: 'Down' },
+  { label: 'Release', icon: '\u25CB', buttonText: 'Release' },
 ];
 
 export function TrashTask({ onComplete, onCancel }: TaskComponentProps) {
@@ -30,10 +30,10 @@ export function TrashTask({ onComplete, onCancel }: TaskComponentProps) {
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
       {/* Title */}
       <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-        Esvaziar Lixo
+        Empty Trash
       </div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 32 }}>
-        Siga as instru&ccedil;&otilde;es em ordem
+        Follow the instructions in order
       </div>
 
       {/* Steps indicator */}
@@ -87,7 +87,7 @@ export function TrashTask({ onComplete, onCancel }: TaskComponentProps) {
       >
         {completed ? (
           <div style={{ fontSize: 20, fontWeight: 700, color: '#4ade80' }}>
-            Lixo esvaziado!
+            Trash emptied!
           </div>
         ) : (
           <div>
@@ -101,7 +101,7 @@ export function TrashTask({ onComplete, onCancel }: TaskComponentProps) {
               {STEPS[currentStep].icon}
             </div>
             <div style={{ fontSize: 14, color: '#e2e2f0', fontWeight: 600 }}>
-              Passo {currentStep + 1} de {STEPS.length}
+              Step {currentStep + 1} of {STEPS.length}
             </div>
             <div style={{ fontSize: 13, color: '#6b6b8a', marginTop: 4 }}>
               {STEPS[currentStep].label}

@@ -48,9 +48,9 @@ export function AlinharAntenaTask({ onComplete }: TaskComponentProps) {
     <div style={{ textAlign: 'center', userSelect: 'none' }}
       onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
     >
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Alinhar Antena</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Align Antenna</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 24 }}>
-        Gire o dial para alinhar com o marcador alvo
+        Turn the dial to align with the target marker
       </div>
 
       <div ref={dialRef} style={{
@@ -89,7 +89,7 @@ export function AlinharAntenaTask({ onComplete }: TaskComponentProps) {
       </div>
 
       <div style={{ fontSize: 14, fontWeight: 600, color: completed ? '#4ade80' : '#6b6b8a' }}>
-        {completed ? 'Antena alinhada!' : 'Arraste a agulha azul até o marcador verde'}
+        {completed ? 'Antenna aligned!' : 'Drag the blue needle to the green marker'}
       </div>
     </div>
   );

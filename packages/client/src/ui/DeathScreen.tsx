@@ -1,18 +1,20 @@
 import { useGameStore } from '../stores/game-store.js';
+import { useNetworkStore } from '../stores/network-store.js';
 import * as s from './styles.js';
 
 const CAUSE_INFO: Record<string, { label: string; color: string }> = {
-  heat: { label: 'CALOR EXTREMO', color: '#ff8844' },
-  cold: { label: 'FRIO INTENSO', color: '#44aaff' },
-  fire: { label: 'QUEIMADURA', color: '#ff4444' },
-  oxygen: { label: 'FALTA DE OXIGENIO', color: '#aa44ff' },
-  'heat+fire': { label: 'CALOR + INCENDIO', color: '#ff6644' },
-  'cold+oxygen': { label: 'FRIO + SEM OXIGENIO', color: '#6688ff' },
-  'heat+oxygen': { label: 'CALOR + SEM OXIGENIO', color: '#ff8866' },
+  heat: { label: 'EXTREME HEAT', color: '#ff8844' },
+  cold: { label: 'EXTREME COLD', color: '#44aaff' },
+  fire: { label: 'BURNED', color: '#ff4444' },
+  oxygen: { label: 'OXYGEN DEPLETION', color: '#aa44ff' },
+  killed: { label: 'ELIMINATED BY SHADOW', color: '#ef4444' },
+  'heat+fire': { label: 'HEAT + FIRE', color: '#ff6644' },
+  'cold+oxygen': { label: 'COLD + NO OXYGEN', color: '#6688ff' },
+  'heat+oxygen': { label: 'HEAT + NO OXYGEN', color: '#ff8866' },
 };
 
 function getCauseInfo(cause: string | null): { label: string; color: string } {
-  if (!cause || cause === 'none') return { label: 'CAUSA DESCONHECIDA', color: s.colors.danger };
+  if (!cause || cause === 'none') return { label: 'UNKNOWN CAUSE', color: s.colors.danger };
   if (CAUSE_INFO[cause]) return CAUSE_INFO[cause];
   // Handle composite causes
   const parts = cause.split('+');
@@ -27,14 +29,42 @@ function getCauseInfo(cause: string | null): { label: string; color: string } {
   };
 }
 
+const btnBase: React.CSSProperties = {
+  padding: '12px 32px',
+  borderRadius: 12,
+  fontSize: 16,
+  fontWeight: 700,
+  cursor: 'pointer',
+  letterSpacing: 1,
+  transition: 'all 0.2s ease',
+  pointerEvents: 'auto',
+  fontFamily: "'Segoe UI', system-ui, sans-serif",
+  width: '100%',
+  maxWidth: 340,
+};
+
 export function DeathScreen() {
   const showDeathScreen = useGameStore((st) => st.showDeathScreen);
   const deathCause = useGameStore((st) => st.deathCause);
   const dismissDeathScreen = useGameStore((st) => st.dismissDeathScreen);
+  const socket = useNetworkStore((st) => st.socket);
 
   if (!showDeathScreen) return null;
 
   const causeInfo = getCauseInfo(deathCause);
+
+  function handleGhost() {
+    socket?.emit('death:choice', { choice: 'ghost' });
+    dismissDeathScreen();
+  }
+
+  function handleLobby() {
+    socket?.emit('death:choice', { choice: 'lobby' });
+  }
+
+  function handleLeave() {
+    useNetworkStore.getState().leaveRoom();
+  }
 
   return (
     <div
@@ -76,7 +106,7 @@ export function DeathScreen() {
       />
 
       {/* Content */}
-      <div style={{ position: 'relative', textAlign: 'center', zIndex: 1 }}>
+      <div style={{ position: 'relative', textAlign: 'center', zIndex: 1, maxWidth: 400 }}>
         <div
           style={{
             fontSize: 56,
@@ -87,7 +117,7 @@ export function DeathScreen() {
             animation: 'deathPulse 2s ease-in-out infinite',
           }}
         >
-          VOCE MORREU
+          YOU DIED
         </div>
 
         {/* Death cause */}
@@ -107,48 +137,85 @@ export function DeathScreen() {
           style={{
             fontSize: 14,
             color: 'rgba(255, 255, 255, 0.5)',
-            marginBottom: 40,
+            marginBottom: 32,
           }}
         >
-          Sua jornada na estacao acabou... mas voce pode continuar como fantasma.
+          Your journey on the station is over...
         </div>
 
-        {/* Continue as ghost button */}
-        <button
-          onClick={dismissDeathScreen}
-          style={{
-            padding: '14px 40px',
-            background: 'rgba(68, 136, 255, 0.2)',
-            border: '2px solid #4488ff',
-            borderRadius: 12,
-            color: '#4488ff',
-            fontSize: 18,
-            fontWeight: 700,
-            cursor: 'pointer',
-            letterSpacing: 1,
-            transition: 'all 0.2s ease',
-            pointerEvents: 'auto',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(68, 136, 255, 0.35)';
-            e.currentTarget.style.boxShadow = '0 0 30px rgba(68, 136, 255, 0.4)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(68, 136, 255, 0.2)';
-            e.currentTarget.style.boxShadow = 'none';
-          }}
-        >
-          CONTINUAR COMO FANTASMA
-        </button>
+        {/* Three choice buttons */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          {/* 1. Continue as ghost */}
+          <button
+            onClick={handleGhost}
+            style={{
+              ...btnBase,
+              background: 'rgba(68, 136, 255, 0.2)',
+              border: '2px solid #4488ff',
+              color: '#4488ff',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(68, 136, 255, 0.35)';
+              e.currentTarget.style.boxShadow = '0 0 30px rgba(68, 136, 255, 0.4)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(68, 136, 255, 0.2)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            CONTINUE AS GHOST
+          </button>
+          <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.3)', marginBottom: 4 }}>
+            Move freely, possess bodies, toggle lights and complete tasks
+          </div>
 
-        <div
-          style={{
-            fontSize: 11,
-            color: 'rgba(255, 255, 255, 0.3)',
-            marginTop: 12,
-          }}
-        >
-          Mova-se livremente, possua corpos, desligue luzes e complete tarefas
+          {/* 2. Return to lobby */}
+          <button
+            onClick={handleLobby}
+            style={{
+              ...btnBase,
+              background: 'rgba(251, 191, 36, 0.15)',
+              border: '2px solid #fbbf24',
+              color: '#fbbf24',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(251, 191, 36, 0.3)';
+              e.currentTarget.style.boxShadow = '0 0 30px rgba(251, 191, 36, 0.3)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(251, 191, 36, 0.15)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            RETURN TO LOBBY
+          </button>
+          <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.3)', marginBottom: 4 }}>
+            Wait in the room for the next match
+          </div>
+
+          {/* 3. Leave room */}
+          <button
+            onClick={handleLeave}
+            style={{
+              ...btnBase,
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '2px solid rgba(239, 68, 68, 0.5)',
+              color: 'rgba(239, 68, 68, 0.7)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)';
+              e.currentTarget.style.boxShadow = '0 0 20px rgba(239, 68, 68, 0.2)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            LEAVE ROOM
+          </button>
+          <div style={{ fontSize: 11, color: 'rgba(255, 255, 255, 0.3)' }}>
+            Back to main menu
+          </div>
         </div>
       </div>
     </div>

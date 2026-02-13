@@ -153,11 +153,11 @@ export function ClickTargetTaskBase({
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginBottom: 12 }}>
         <div style={{ fontSize: 14, color: '#44aaff', fontWeight: 600 }}>
-          Alvos: {Math.min(score, targetCount)}/{targetCount}
+          Targets: {Math.min(score, targetCount)}/{targetCount}
         </div>
         {hasDecoys && penalty > 0 && (
           <div style={{ fontSize: 14, color: '#ef4444', fontWeight: 600 }}>
-            Penalidade: -{penalty}
+            Penalty: -{penalty}
           </div>
         )}
       </div>
@@ -175,7 +175,7 @@ export function ClickTargetTaskBase({
 
       {completed && (
         <div style={{ marginTop: 16, fontSize: 18, fontWeight: 700, color: '#4ade80' }}>
-          Todos os alvos neutralizados!
+          All targets neutralized!
         </div>
       )}
     </div>

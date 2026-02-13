@@ -65,11 +65,13 @@ function PowerStatus({ powerConfig, isActive, cooldownEnd, targetId, powerUsesLe
   const teleportMapOpen = useGameStore((st) => st.teleportMapOpen);
   const targetName = targetId ? (playerInfo[targetId]?.name ?? '???') : null;
   const isTeleport = powerConfig.type === PowerType.TELEPORT;
+  const isMuralha = powerConfig.type === PowerType.MURALHA;
+  const hasCharges = powerConfig.usesPerMatch > 1;
 
   let statusText: string;
   let statusColor: string;
   if (teleportMapOpen) {
-    statusText = 'SELECIONE O DESTINO NO MAPA...';
+    statusText = 'SELECT DESTINATION ON MAP...';
     statusColor = s.colors.primary;
   } else if (targetingMode) {
     statusText = 'SELECT A TARGET...';
@@ -81,10 +83,13 @@ function PowerStatus({ powerConfig, isActive, cooldownEnd, targetId, powerUsesLe
     statusText = `Cooldown: ${cooldownRemaining}s`;
     statusColor = s.colors.warning;
   } else if (isTeleport && powerUsesLeft > 0) {
-    statusText = '[Q] Teleportar | Segurar [Q] Abrir mapa';
+    statusText = '[Q] Teleport | Hold [Q] Open map';
     statusColor = s.colors.primary;
-  } else if (isTeleport && powerUsesLeft <= 0) {
-    statusText = 'Sem cargas restantes';
+  } else if (isMuralha && powerUsesLeft > 0) {
+    statusText = '[Q] Place wall';
+    statusColor = s.colors.primary;
+  } else if (hasCharges && powerUsesLeft <= 0) {
+    statusText = 'No charges left';
     statusColor = s.colors.textMuted;
   } else {
     statusText = 'Press [Q] to activate';
@@ -112,10 +117,10 @@ function PowerStatus({ powerConfig, isActive, cooldownEnd, targetId, powerUsesLe
       <div style={{ fontSize: 11, color: s.colors.textMuted, marginTop: 2 }}>
         {powerConfig.description}
       </div>
-      {/* Teleport charge dots */}
-      {isTeleport && (
+      {/* Charge dots (for multi-charge powers like Teleport, Muralha) */}
+      {hasCharges && (
         <div style={{ display: 'flex', gap: 4, marginTop: 6, alignItems: 'center' }}>
-          <span style={{ fontSize: 10, color: s.colors.textMuted, marginRight: 4 }}>Cargas:</span>
+          <span style={{ fontSize: 10, color: s.colors.textMuted, marginRight: 4 }}>Charges:</span>
           {Array.from({ length: powerConfig.usesPerMatch }, (_, i) => (
             <div
               key={i}
@@ -175,7 +180,7 @@ function TaskCounter() {
         minWidth: 140,
       }}
     >
-      <div>Minhas: {myCompleted}/{myTotal}</div>
+      <div>Mine: {myCompleted}/{myTotal}</div>
       {/* Global task progress bar */}
       <div style={{ width: '100%', height: 6, background: 'rgba(255,255,255,0.1)', borderRadius: 3, marginTop: 4, overflow: 'hidden' }}>
         <div style={{
@@ -241,11 +246,11 @@ function TaskPrompt() {
       </div>
       {isCompleted ? (
         <div style={{ fontSize: 12, color: s.colors.success, fontWeight: 600 }}>
-          Conclu\u00eddo
+          Completed
         </div>
       ) : isBusy ? (
         <div style={{ fontSize: 12, color: s.colors.warning, fontWeight: 600 }}>
-          Em uso por outro jogador
+          In use by another player
         </div>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
@@ -264,7 +269,7 @@ function TaskPrompt() {
             E
           </span>
           <span style={{ fontSize: 13, color: '#aabbdd', fontWeight: 600 }}>
-            Interagir
+            Interact
           </span>
         </div>
       )}
@@ -338,10 +343,10 @@ function DamageSourceIndicator() {
   if (damageSource === 'none' && !inShelter && !doorProtection) return null;
 
   const LABELS: Record<string, { text: string; color: string }> = {
-    heat: { text: 'CALOR EXTREMO', color: '#ff8844' },
-    cold: { text: 'FRIO INTENSO', color: '#44aaff' },
-    fire: { text: 'EM CHAMAS', color: '#ff4444' },
-    oxygen: { text: 'SEM OXIGENIO', color: '#aa44ff' },
+    heat: { text: 'EXTREME HEAT', color: '#ff8844' },
+    cold: { text: 'EXTREME COLD', color: '#44aaff' },
+    fire: { text: 'ON FIRE', color: '#ff4444' },
+    oxygen: { text: 'NO OXYGEN', color: '#aa44ff' },
   };
 
   const parts = damageSource !== 'none' ? damageSource.split('+') : [];
@@ -417,7 +422,7 @@ function DamageSourceIndicator() {
               letterSpacing: 1,
             }}
           >
-            ABRIGO: PROTEGIDO
+            SHELTER: PROTECTED
           </div>
         )}
         {doorProtection && !inShelter && (
@@ -433,7 +438,7 @@ function DamageSourceIndicator() {
               letterSpacing: 1,
             }}
           >
-            PORTAS FECHADAS: -50% DANO
+            DOORS CLOSED: -50% DAMAGE
           </div>
         )}
       </div>
@@ -479,14 +484,14 @@ function GhostAbilityBar() {
         }}
       >
         <div style={{ fontSize: 12, fontWeight: 700, color: '#4488ff' }}>
-          [Q] POSSUIR
+          [Q] POSSESS
         </div>
         <div style={{ fontSize: 10, color: s.colors.textMuted }}>
           {possessing
-            ? `Controlando: ${targetName}`
+            ? `Controlling: ${targetName}`
             : onCooldown
             ? `Cooldown: ${cooldownSec}s`
-            : '20s de controle'}
+            : '20s control'}
         </div>
       </div>
 
@@ -501,10 +506,10 @@ function GhostAbilityBar() {
         }}
       >
         <div style={{ fontSize: 12, fontWeight: 700, color: s.colors.warning }}>
-          [F] LUZ
+          [F] LIGHT
         </div>
         <div style={{ fontSize: 10, color: s.colors.textMuted }}>
-          Desligar/ligar luz
+          Toggle light on/off
         </div>
       </div>
 
@@ -519,10 +524,10 @@ function GhostAbilityBar() {
         }}
       >
         <div style={{ fontSize: 12, fontWeight: 700, color: s.colors.success }}>
-          [E] TAREFA
+          [E] TASK
         </div>
         <div style={{ fontSize: 10, color: s.colors.textMuted }}>
-          Qualquer tarefa
+          Any task
         </div>
       </div>
     </div>
@@ -567,7 +572,7 @@ function OxygenBar() {
       `}</style>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: '#44aaff', letterSpacing: 1 }}>
-          Oxigênio da NAVE
+          SHIP OXYGEN
         </span>
         <span style={{ fontSize: 11, fontWeight: 600, color: barColor }}>
           {pct}%
@@ -586,12 +591,12 @@ function OxygenBar() {
       </div>
       {isDepleted && (
         <div style={{ fontSize: 11, color: s.colors.danger, fontWeight: 700, marginTop: 4, textAlign: 'center', letterSpacing: 1 }}>
-          OXIG\u00CANIO ESGOTADO - REPONHA NOS GERADORES!
+          OXYGEN DEPLETED - REFILL AT GENERATORS!
         </div>
       )}
       {isRefilling && !isDepleted && (
         <div style={{ fontSize: 10, color: s.colors.success, marginTop: 4, textAlign: 'center' }}>
-          {isMeRefilling ? 'Repondo oxig\u00EAnio...' : `${refillerName} est\u00E1 repondo...`}
+          {isMeRefilling ? 'Refilling oxygen...' : `${refillerName} is refilling...`}
         </div>
       )}
     </div>
@@ -674,13 +679,13 @@ function OxygenGuide() {
       {/* Info */}
       <div>
         <div style={{ fontSize: 12, fontWeight: 700, color: borderColor, letterSpacing: 1 }}>
-          {isUrgent ? 'REPOR OXIG\u00CANIO AGORA!' : 'Oxig\u00EAnio baixo'}
+          {isUrgent ? 'REFILL OXYGEN NOW!' : 'Oxygen low'}
         </div>
         <div style={{ fontSize: 11, color: s.colors.text }}>
           {nearestGen.roomName} ({dist}m)
         </div>
         <div style={{ fontSize: 10, color: s.colors.textMuted }}>
-          [G] para repor no gerador
+          [G] to refill at generator
         </div>
       </div>
     </div>
@@ -846,7 +851,7 @@ function TaskList() {
         onClick={() => setOpen((prev) => !prev)}
       >
         <div style={{ fontSize: 12, fontWeight: 700, color: s.colors.textMuted, letterSpacing: 1 }}>
-          TAREFAS {completedCount}/{taskData.length}
+          TASKS {completedCount}/{taskData.length}
         </div>
         <div style={{ fontSize: 10, color: s.colors.textMuted }}>
           [Tab] {open ? '\u25B2' : '\u25BC'}
@@ -934,6 +939,101 @@ function TaskList() {
   );
 }
 
+function BodyReportPrompt() {
+  const nearestBodyId = useGameStore((st) => st.nearestBodyId);
+  if (!nearestBodyId) return null;
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: '48%',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        background: 'rgba(239, 68, 68, 0.15)',
+        border: '2px solid #ef4444',
+        borderRadius: 12,
+        padding: '10px 24px',
+        textAlign: 'center',
+        animation: 'reportPulse 1.2s ease-in-out infinite',
+        pointerEvents: 'none',
+        zIndex: 10,
+      }}
+    >
+      <style>{`
+        @keyframes reportPulse {
+          0%, 100% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.3); }
+          50% { box-shadow: 0 0 24px rgba(239, 68, 68, 0.7); }
+        }
+      `}</style>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        <span
+          style={{
+            display: 'inline-block',
+            background: '#ef4444',
+            color: '#000',
+            borderRadius: 4,
+            padding: '2px 10px',
+            fontWeight: 'bold',
+            fontSize: 14,
+            letterSpacing: 1,
+          }}
+        >
+          R
+        </span>
+        <span style={{ fontSize: 15, color: '#ff6b6b', fontWeight: 700 }}>
+          REPORTAR CORPO
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function EmergencyPrompt() {
+  const nearEmergencyButton = useGameStore((st) => st.nearEmergencyButton);
+  const nearestInteractTask = useGameStore((st) => st.nearestInteractTask);
+  // Don't show emergency prompt if there's a nearby interactable task
+  if (!nearEmergencyButton || nearestInteractTask) return null;
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: '62%',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        background: 'rgba(109, 40, 217, 0.15)',
+        border: '2px solid #7c3aed',
+        borderRadius: 12,
+        padding: '8px 20px',
+        textAlign: 'center',
+        pointerEvents: 'none',
+        zIndex: 10,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        <span
+          style={{
+            display: 'inline-block',
+            background: '#7c3aed',
+            color: '#fff',
+            borderRadius: 4,
+            padding: '2px 10px',
+            fontWeight: 'bold',
+            fontSize: 14,
+            letterSpacing: 1,
+          }}
+        >
+          E
+        </span>
+        <span style={{ fontSize: 14, color: '#a78bfa', fontWeight: 700 }}>
+          EMERGENCY
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function GameHUD() {
   const role = useGameStore((st) => st.localRole);
   const power = useGameStore((st) => st.localPower);
@@ -985,7 +1085,7 @@ export function GameHUD() {
               color: '#4488ff',
             }}
           >
-            FANTASMA
+            GHOST
           </div>
         ) : (
           <div
@@ -1029,67 +1129,11 @@ export function GameHUD() {
         />
       )}
 
-      {/* Action buttons (alive only) */}
-      {!isGhost && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 24,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            gap: 12,
-            pointerEvents: 'auto',
-          }}
-        >
-          {role === 'shadow' && (
-            <button
-              style={{
-                padding: '10px 24px',
-                background: 'rgba(239, 68, 68, 0.2)',
-                border: `1px solid ${s.colors.danger}`,
-                borderRadius: 8,
-                color: s.colors.danger,
-                fontSize: 14,
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              KILL [Space]
-            </button>
-          )}
+      {/* Context-aware body report prompt (alive only) */}
+      {!isGhost && <BodyReportPrompt />}
 
-          <button
-            style={{
-              padding: '10px 24px',
-              background: 'rgba(251, 191, 36, 0.2)',
-              border: `1px solid ${s.colors.warning}`,
-              borderRadius: 8,
-              color: s.colors.warning,
-              fontSize: 14,
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            REPORT [R]
-          </button>
-
-          <button
-            style={{
-              padding: '10px 24px',
-              background: 'rgba(109, 40, 217, 0.2)',
-              border: `1px solid ${s.colors.primary}`,
-              borderRadius: 8,
-              color: s.colors.primary,
-              fontSize: 14,
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            EMERGENCY [E]
-          </button>
-        </div>
-      )}
+      {/* Emergency button prompt (alive only) */}
+      {!isGhost && <EmergencyPrompt />}
 
       {/* Task list panel (top-right, Tab to toggle) */}
       <TaskList />

@@ -296,7 +296,7 @@ export function Minimap() {
           textTransform: 'uppercase',
         }}
       >
-        Mapa da Estacao — [M]
+        Station Map — [M]
       </div>
 
       {/* Map canvas */}

@@ -19,8 +19,13 @@ import { eraPhysicsState } from './environment/ThreeBodyEnvironment.js';
 import { mouseState } from './networking/mouse-state.js';
 import { TargetSelector } from './ui/TargetSelector.js';
 import { DeathScreen } from './ui/DeathScreen.js';
+import { GameEndScreen } from './ui/GameEndScreen.js';
 import { LoadingScreen } from './ui/LoadingScreen.js';
 import { TeleportMapOverlay } from './ui/TeleportMapOverlay.js';
+import { HackerPanel } from './ui/HackerPanel.js';
+import { PipeMapOverlay } from './ui/PipeMapOverlay.js';
+import { MeetingScreen } from './ui/MeetingScreen.js';
+import { GameOverScreen } from './ui/GameOverScreen.js';
 
 function RouterSync() {
   const navigate = useNavigate();
@@ -37,7 +42,7 @@ function GameGuard() {
   const currentRoomCode = useNetworkStore((st) => st.currentRoomCode);
   const phase = useGameStore((st) => st.phase);
 
-  if (currentRoomCode !== roomCode || (phase !== 'loading' && phase !== 'playing' && phase !== 'results')) {
+  if (currentRoomCode !== roomCode || (phase !== 'loading' && phase !== 'playing' && phase !== 'meeting' && phase !== 'results')) {
     return <Navigate to="/" replace />;
   }
 
@@ -64,8 +69,8 @@ function GameNetworkBridge() {
         () => mouseRef.current,
         (input) => {
           const gameStore = useGameStore.getState();
-          // Block movement input when task overlay, target selector, or teleport map is open
-          if (gameStore.taskOverlayVisible || gameStore.targetingMode || gameStore.teleportMapOpen) {
+          // Block movement input when task overlay, target selector, teleport map, hacker panel, or meeting is open
+          if (gameStore.taskOverlayVisible || gameStore.targetingMode || gameStore.teleportMapOpen || gameStore.hackerPanelOpen || gameStore.phase === 'meeting') {
             input.forward = false;
             input.backward = false;
             input.left = false;
@@ -118,12 +123,21 @@ function GameNetworkBridge() {
               const { localPower, targetingMode, teleportMapOpen } = gameStore;
               const config = localPower ? POWER_CONFIGS[localPower] : null;
 
-              if (teleportMapOpen) {
+              if (gameStore.hackerPanelOpen) {
+                // Q closes hacker panel and deactivates power
+                gameStore.closeHackerPanel();
+                socket.emit('power:deactivate');
+              } else if (teleportMapOpen) {
                 // Q cancels teleport map
                 gameStore.closeTeleportMap();
               } else if (targetingMode) {
                 // Q cancels targeting mode
                 gameStore.exitTargetingMode();
+              } else if (config?.type === PowerType.HACKER) {
+                // Hacker: activate power and open control panel
+                playPowerActivate();
+                socket.emit('power:activate', {});
+                gameStore.openHackerPanel();
               } else if (config?.type === PowerType.TELEPORT) {
                 // Teleport: defer — wait for hold/release detection (handled below)
               } else if (config?.requiresTarget && config.targetRange) {
@@ -295,10 +309,15 @@ function GameNetworkBridge() {
     }
   }, [phase, socket, arrowKeysRef, mouseRef]);
 
-  // Power deactivation sound
+  // Power deactivation sound + close hacker panel
   useEffect(() => {
     if (phase !== 'playing' || !socket) return;
-    const handler = () => { playPowerDeactivate(); };
+    const handler = ({ powerType }: { powerType: string }) => {
+      playPowerDeactivate();
+      if (powerType === PowerType.HACKER) {
+        useGameStore.getState().closeHackerPanel();
+      }
+    };
     socket.on('power:ended', handler as any);
     return () => { socket.off('power:ended', handler as any); };
   }, [phase, socket]);
@@ -393,8 +412,20 @@ export function App() {
       {/* Teleport map overlay */}
       {phase === 'playing' && <TeleportMapOverlay />}
 
+      {/* Hacker control panel overlay */}
+      {phase === 'playing' && <HackerPanel />}
+
+      {/* Underground pipe map overlay */}
+      {phase === 'playing' && <PipeMapOverlay />}
+
       {/* Death screen overlay */}
       {phase === 'playing' && <DeathScreen />}
+
+      {/* Meeting screen overlay */}
+      {phase === 'meeting' && <MeetingScreen />}
+
+      {/* Game end results overlay */}
+      {phase === 'results' && <GameOverScreen />}
 
       {/* UI overlay based on current route */}
       <Routes>

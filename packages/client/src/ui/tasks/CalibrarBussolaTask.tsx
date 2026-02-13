@@ -4,8 +4,8 @@ import type { TaskComponentProps } from '../TaskOverlay.js';
 export function CalibrarBussolaTask({ onComplete, onCancel }: TaskComponentProps) {
   return (
     <TimingTaskBase
-      title="Calibrar Bússola"
-      subtitle="Clique quando a agulha estiver na zona verde — 3 acertos seguidos"
+      title="Calibrate Compass"
+      subtitle="Click when the needle is in the green zone — 3 hits in a row"
       speed={180}
       zoneSize={30}
       requiredHits={3}

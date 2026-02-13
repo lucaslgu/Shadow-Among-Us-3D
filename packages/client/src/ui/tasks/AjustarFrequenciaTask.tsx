@@ -87,9 +87,9 @@ export function AjustarFrequenciaTask({ onComplete }: TaskComponentProps) {
 
   return (
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Ajustar Frequência</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Tune Frequency</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 16 }}>
-        Alinhe a onda azul com a onda verde e mantenha
+        Align the blue wave with the green wave and hold
       </div>
 
       <canvas
@@ -115,18 +115,18 @@ export function AjustarFrequenciaTask({ onComplete }: TaskComponentProps) {
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
         <div style={{ fontSize: 14, color: matchPct >= 85 ? '#4ade80' : '#6b6b8a', fontWeight: 600 }}>
-          Sincronização: {matchPct}%
+          Sync: {matchPct}%
         </div>
         {matchPct >= 85 && !completed && (
           <div style={{ fontSize: 14, color: '#eab308', fontWeight: 600 }}>
-            Mantendo... {holdPct}%
+            Holding... {holdPct}%
           </div>
         )}
       </div>
 
       {completed && (
         <div style={{ marginTop: 16, fontSize: 18, fontWeight: 700, color: '#4ade80' }}>
-          Frequência sincronizada!
+          Frequency synced!
         </div>
       )}
     </div>

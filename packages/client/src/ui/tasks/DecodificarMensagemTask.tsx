@@ -6,7 +6,7 @@ const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 export function DecodificarMensagemTask({ onComplete }: TaskComponentProps) {
   const [offset] = useState(() => 1 + Math.floor(Math.random() * 24)); // 1-24
   const [targetWord] = useState(() => {
-    const words = ['NAVE', 'SOMBRA', 'CASCO', 'MOTOR', 'ORBITA', 'ASTRO', 'PULSO', 'SIGMA'];
+    const words = ['SHIP', 'SHADOW', 'HULL', 'ENGINE', 'ORBIT', 'ASTRO', 'PULSE', 'SIGMA'];
     return words[Math.floor(Math.random() * words.length)];
   });
   const [wheelOffset, setWheelOffset] = useState(0);
@@ -38,9 +38,9 @@ export function DecodificarMensagemTask({ onComplete }: TaskComponentProps) {
 
   return (
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Decodificar Mensagem</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Decode Message</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 24 }}>
-        Gire a roda para decodificar a mensagem cifrada
+        Turn the wheel to decode the encrypted message
       </div>
 
       {/* Encrypted text */}
@@ -49,7 +49,7 @@ export function DecodificarMensagemTask({ onComplete }: TaskComponentProps) {
         padding: 16, marginBottom: 16,
       }}>
         <div style={{ fontSize: 12, color: '#6b6b8a', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
-          Cifrado
+          Encrypted
         </div>
         <div style={{
           fontSize: 32, fontWeight: 700, fontFamily: "'Courier New', monospace",
@@ -63,7 +63,7 @@ export function DecodificarMensagemTask({ onComplete }: TaskComponentProps) {
         borderRadius: 12, padding: 16, marginBottom: 24,
       }}>
         <div style={{ fontSize: 12, color: '#6b6b8a', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
-          Decodificado
+          Decoded
         </div>
         <div style={{
           fontSize: 32, fontWeight: 700, fontFamily: "'Courier New', monospace",
@@ -96,7 +96,7 @@ export function DecodificarMensagemTask({ onComplete }: TaskComponentProps) {
       </div>
 
       <div style={{ fontSize: 14, fontWeight: 600, color: completed ? '#4ade80' : '#6b6b8a' }}>
-        {completed ? 'Mensagem decodificada!' : 'Ajuste o deslocamento da cifra'}
+        {completed ? 'Message decoded!' : 'Adjust the cipher offset'}
       </div>
     </div>
   );

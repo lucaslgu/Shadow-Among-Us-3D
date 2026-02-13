@@ -10,7 +10,7 @@ const TIMEOUT_MS = 8000;
 // ═══════════════════════════════════════════════════════════════
 
 export const DEFAULT_SCENARIO: CosmicScenario = {
-  theme: 'Orbita Classica',
+  theme: 'Classic Orbit',
   suns: [
     { name: 'Ignis', color: '#ff6600', radius: 35, intensity: 0.4, pulseSpeed: 0.8,
       coronaColor: '#ff8833', dustCloudColor: '#ff4400', coronaIntensity: 1.5, dustCloudRadius: 70 },
@@ -20,14 +20,14 @@ export const DEFAULT_SCENARIO: CosmicScenario = {
       coronaColor: '#ffffcc', dustCloudColor: '#ccccaa', coronaIntensity: 1.3, dustCloudRadius: 60 },
   ],
   phases: [
-    { startSec: 0, endSec: 90, era: 'stable', gravity: 1.0, description: 'Os tres sois orbitam em harmonia.' },
-    { startSec: 90, endSec: 130, era: 'chaosInferno', gravity: 2.0, description: 'Os sois se aproximam perigosamente!' },
-    { startSec: 130, endSec: 190, era: 'stable', gravity: 1.0, description: 'Uma calma temporaria retorna.' },
-    { startSec: 190, endSec: 230, era: 'chaosIce', gravity: 0.3, description: 'Todos os sois desaparecem no horizonte.' },
-    { startSec: 230, endSec: 320, era: 'stable', gravity: 1.0, description: 'Os sois retornam lentamente.' },
-    { startSec: 320, endSec: 365, era: 'chaosInferno', gravity: 1.8, description: 'Alinhamento triplo iminente!' },
-    { startSec: 365, endSec: 420, era: 'stable', gravity: 1.0, description: 'Estabilidade restaurada.' },
-    { startSec: 420, endSec: 480, era: 'chaosIce', gravity: 0.3, description: 'Noite eterna se aproxima.' },
+    { startSec: 0, endSec: 90, era: 'stable', gravity: 1.0, description: 'The three suns orbit in harmony.' },
+    { startSec: 90, endSec: 130, era: 'chaosInferno', gravity: 2.0, description: 'The suns approach dangerously!' },
+    { startSec: 130, endSec: 190, era: 'stable', gravity: 1.0, description: 'A temporary calm returns.' },
+    { startSec: 190, endSec: 230, era: 'chaosIce', gravity: 0.3, description: 'All suns vanish beyond the horizon.' },
+    { startSec: 230, endSec: 320, era: 'stable', gravity: 1.0, description: 'The suns slowly return.' },
+    { startSec: 320, endSec: 365, era: 'chaosInferno', gravity: 1.8, description: 'Triple alignment imminent!' },
+    { startSec: 365, endSec: 420, era: 'stable', gravity: 1.0, description: 'Stability restored.' },
+    { startSec: 420, endSec: 480, era: 'chaosIce', gravity: 0.3, description: 'Eternal night approaches.' },
   ],
   starfield: {
     starCount: 4000,
@@ -43,44 +43,44 @@ export const DEFAULT_SCENARIO: CosmicScenario = {
 // Prompt
 // ═══════════════════════════════════════════════════════════════
 
-const SYSTEM_PROMPT = `Voce e um designer de cenarios cosmicos para o jogo "Shadow Among Us 3D", inspirado no Problema dos Tres Corpos. O jogo se passa em uma estacao espacial orbitando um sistema estelar caotico com 3 sois.
+const SYSTEM_PROMPT = `You are a cosmic scenario designer for the game "Shadow Among Us 3D", inspired by the Three-Body Problem. The game takes place on a space station orbiting a chaotic star system with 3 suns.
 
-Gere um cenario cosmico unico com:
-1. Um tema criativo em portugues (ex: "Eclipse Tripla", "Danca dos Titas", "Furia Solar")
-2. Configuracao de 3 sois com nomes unicos, cores hex variadas, tamanhos e intensidades diferentes
-3. Uma timeline de 6 a 10 fases ambientais cobrindo exatamente 480 segundos
-4. Configuracao do campo estelar de fundo
+Generate a unique cosmic scenario with:
+1. A creative theme in English (e.g., "Triple Eclipse", "Dance of the Titans", "Solar Fury")
+2. Configuration for 3 suns with unique names, varied hex colors, different sizes and intensities
+3. A timeline of 6 to 10 environmental phases covering exactly 480 seconds
+4. Background star field configuration
 
-Regras das fases:
-- "stable": gravidade normal (0.8-1.2), ambiente calmo, poeira flutuante
-- "chaosInferno": gravidade alta (1.5-2.5), fogo, calor extremo, sois proximos
-- "chaosIce": gravidade baixa (0.2-0.5), gelo, neve, escuridao, sois distantes
-- As fases devem ser contiguas (endSec de uma = startSec da proxima)
-- A primeira fase deve comecar em startSec=0
-- A ultima fase deve terminar em endSec=480
-- Alterne entre eras — nao repita a mesma era consecutivamente
-- A primeira fase deve ser "stable" (60-100 segundos)
-- Inclua pelo menos 2 fases de cada tipo de caos
-- Descricoes em portugues, max 100 caracteres, narrativas e dramaticas
+Phase rules:
+- "stable": normal gravity (0.8-1.2), calm environment, floating dust
+- "chaosInferno": high gravity (1.5-2.5), fire, extreme heat, suns nearby
+- "chaosIce": low gravity (0.2-0.5), ice, snow, darkness, distant suns
+- Phases must be contiguous (endSec of one = startSec of the next)
+- The first phase must start at startSec=0
+- The last phase must end at endSec=480
+- Alternate between eras — do not repeat the same era consecutively
+- The first phase must be "stable" (60-100 seconds)
+- Include at least 2 phases of each chaos type
+- Descriptions in English, max 100 characters, narrative and dramatic
 
-Regras dos sois:
-- Cores variadas e criativas (hex format #RRGGBB)
-- radius: 20-50 (tamanho visual)
-- intensity: 0.2-0.5 (intensidade luminosa)
-- pulseSpeed: 0.5-2.0 (velocidade de pulsacao)
-- Cada sol deve ter personalidade distinta (um pode ser agressivo/grande, outro frio/pequeno, etc)
-- coronaColor: cor hex do halo/corona ao redor do sol (ligeiramente diferente da cor principal, mais clara)
-- dustCloudColor: cor hex da nuvem de poeira/disco de acrecao que orbita o sol
-- coronaIntensity: 0.5-3.0 (multiplicador de brilho da corona — sois agressivos tem corona mais intensa)
-- dustCloudRadius: 30-120 (raio da nuvem de poeira ao redor do sol — proporcional ao tamanho)
+Sun rules:
+- Varied and creative colors (hex format #RRGGBB)
+- radius: 20-50 (visual size)
+- intensity: 0.2-0.5 (light intensity)
+- pulseSpeed: 0.5-2.0 (pulse speed)
+- Each sun should have a distinct personality (one can be aggressive/large, another cold/small, etc)
+- coronaColor: hex color of the halo/corona around the sun (slightly different from the main color, lighter)
+- dustCloudColor: hex color of the dust cloud/accretion disk orbiting the sun
+- coronaIntensity: 0.5-3.0 (corona brightness multiplier — aggressive suns have more intense corona)
+- dustCloudRadius: 30-120 (dust cloud radius around the sun — proportional to size)
 
-Regras do campo estelar:
-- starCount: 2000-8000 (quantidade de estrelas no ceu — cenarios mais dramaticos = mais estrelas)
-- starSaturation: 0-1 (0=estrelas brancas, 1=coloridas — cenarios caoticos tem mais cor)
-- nebulaColor: cor hex da nebulosa dominante no ceu (tematicamente consistente: fogo=avermelhada, gelo=azulada, misto=roxa)
-- nebulaIntensity: 0.1-1.0 (intensidade/opacidade das nuvens de nebulosa)
-- cosmicDustDensity: 0.1-1.0 (densidade de poeira cosmica flutuando pelo espaco)
-- cosmicDustColor: cor hex da poeira cosmica ambiental`;
+Star field rules:
+- starCount: 2000-8000 (number of stars in the sky — more dramatic scenarios = more stars)
+- starSaturation: 0-1 (0=white stars, 1=colorful — chaotic scenarios have more color)
+- nebulaColor: hex color of the dominant nebula in the sky (thematically consistent: fire=reddish, ice=bluish, mixed=purple)
+- nebulaIntensity: 0.1-1.0 (intensity/opacity of nebula clouds)
+- cosmicDustDensity: 0.1-1.0 (density of cosmic dust floating through space)
+- cosmicDustColor: hex color of ambient cosmic dust`;
 
 // ═══════════════════════════════════════════════════════════════
 // Gemini API response schema (OpenAPI subset for structured output)
@@ -160,7 +160,7 @@ export async function generateCosmicScenario(): Promise<CosmicScenario> {
       signal: controller.signal,
       body: JSON.stringify({
         contents: [{
-          parts: [{ text: 'Gere um cenario cosmico unico e criativo para esta partida.' }],
+          parts: [{ text: 'Generate a unique and creative cosmic scenario for this match.' }],
         }],
         systemInstruction: {
           parts: [{ text: SYSTEM_PROMPT }],

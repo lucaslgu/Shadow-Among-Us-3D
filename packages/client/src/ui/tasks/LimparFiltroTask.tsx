@@ -4,13 +4,13 @@ import type { TaskComponentProps } from '../TaskOverlay.js';
 export function LimparFiltroTask({ onComplete, onCancel }: TaskComponentProps) {
   return (
     <SequenceTaskBase
-      title="Limpar Filtro"
-      subtitle="Siga os passos para trocar o filtro"
+      title="Clean Filter"
+      subtitle="Follow the steps to replace the filter"
       steps={[
-        { label: 'Abrir a tampa do filtro', icon: '🔓', buttonText: 'Abrir Tampa' },
-        { label: 'Remover filtro antigo', icon: '🗑️', buttonText: 'Remover Filtro' },
-        { label: 'Inserir filtro novo', icon: '📦', buttonText: 'Inserir Filtro' },
-        { label: 'Fechar a tampa', icon: '🔒', buttonText: 'Fechar Tampa' },
+        { label: 'Open filter cover', icon: '🔓', buttonText: 'Open Cover' },
+        { label: 'Remove old filter', icon: '🗑️', buttonText: 'Remove Filter' },
+        { label: 'Insert new filter', icon: '📦', buttonText: 'Insert Filter' },
+        { label: 'Close cover', icon: '🔒', buttonText: 'Close Cover' },
       ]}
       onComplete={onComplete}
       onCancel={onCancel}

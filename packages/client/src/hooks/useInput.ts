@@ -15,7 +15,7 @@ export function useInput(): InputRefs {
   // Arrow keys for Mind Controller dual-control
   const arrowKeysRef = useRef({ forward: false, backward: false, left: false, right: false });
   // Action keys
-  const actionRef = useRef({ power: false, powerConsumed: false, powerDownTime: 0, powerUp: false, flashlightOn: true, mindControlPower: false });
+  const actionRef = useRef({ power: false, powerConsumed: false, powerDownTime: 0, powerUp: false, flashlightOn: false, mindControlPower: false });
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {

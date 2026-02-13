@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import type { TaskComponentProps } from '../TaskOverlay.js';
 
 const MINERAL_COLORS = ['#ef4444', '#3b82f6', '#eab308', '#22c55e', '#a855f7'];
-const COLOR_NAMES = ['Rubi', 'Safira', 'Topázio', 'Esmeralda', 'Ametista'];
+const COLOR_NAMES = ['Ruby', 'Sapphire', 'Topaz', 'Emerald', 'Amethyst'];
 const BIN_COUNT = 3;
 
 export function ClassificarMineraisTask({ onComplete }: TaskComponentProps) {
@@ -51,9 +51,9 @@ export function ClassificarMineraisTask({ onComplete }: TaskComponentProps) {
 
   return (
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Classificar Minerais</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Sort Minerals</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 24 }}>
-        Arraste cada mineral para o recipiente da cor correta
+        Drag each mineral to the correct color container
       </div>
 
       {/* Minerals row */}
@@ -107,7 +107,7 @@ export function ClassificarMineraisTask({ onComplete }: TaskComponentProps) {
       </div>
 
       <div style={{ marginTop: 24, fontSize: 14, fontWeight: 600, color: completed ? '#4ade80' : '#6b6b8a' }}>
-        {completed ? 'Minerais classificados!' : `${placedCount}/${minerals.length} classificados`}
+        {completed ? 'Minerals sorted!' : `${placedCount}/${minerals.length} sorted`}
       </div>
     </div>
   );

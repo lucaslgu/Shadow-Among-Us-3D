@@ -55,12 +55,35 @@ export interface ShelterZone {
   roomId: string;
 }
 
+// Emergency button — central table for meetings
+export interface EmergencyButtonInfo {
+  id: string;
+  position: [number, number, number];
+}
+
 // Oxygen generators — players interact to refill ship oxygen
 export interface OxygenGeneratorInfo {
   id: string;                         // "oxy_R_C"
   roomId: string;                     // parent room id
   roomName: string;                   // display name of the room
   position: [number, number, number]; // world position
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Underground Pipe Network — fast-travel system between rooms
+// ═══════════════════════════════════════════════════════════════
+
+export interface PipeNode {
+  id: string;                         // "pipe_R_C"
+  roomId: string;                     // parent room id
+  roomName: string;                   // display name of the room
+  surfacePosition: [number, number, number]; // entrance on the surface (y=0)
+  undergroundPosition: [number, number, number]; // position in underground tunnel network
+}
+
+export interface PipeConnection {
+  nodeA: string;  // PipeNode id
+  nodeB: string;  // PipeNode id
 }
 
 // Static layout — sent once at game start
@@ -78,13 +101,17 @@ export interface MazeLayout {
   decorations: DecoObjectInfo[];
   shelterZones: ShelterZone[];
   oxygenGenerators: OxygenGeneratorInfo[];
+  emergencyButton: EmergencyButtonInfo;
+  pipeNodes: PipeNode[];
+  pipeConnections: PipeConnection[];
 }
 
 // Temporary barrier wall created by the MURALHA power
 export interface MuralhaWall {
-  ownerId: string;          // socketId of the player who created it
-  start: [number, number];  // (x, z) world coords
-  end: [number, number];    // (x, z) world coords
+  wallId: string;             // unique identifier per wall (e.g., "socketId_0")
+  ownerId: string;            // socketId of the player who created it
+  start: [number, number];    // (x, z) world coords
+  end: [number, number];      // (x, z) world coords
 }
 
 // Mutable state — included in StateSnapshot every tick

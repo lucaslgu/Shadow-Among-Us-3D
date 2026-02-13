@@ -63,6 +63,9 @@ interface NetworkState {
   // Ready states
   readyStates: Record<string, boolean>;
 
+  // Waiting for game to end (player returned to lobby mid-game)
+  waitingForGame: boolean;
+
   // Actions
   connect: () => void;
   disconnect: () => void;
@@ -102,6 +105,8 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
   lobbyPlayers: [],
 
   readyStates: {},
+
+  waitingForGame: false,
 
   connect: () => {
     if (get().socket) return;
@@ -154,12 +159,19 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
     socket.on('room:joined', ({ gameState, lobbyPlayers }) => {
       const { playerName } = get();
       const roomCode = gameState.roomCode;
+      // Detect if returning to lobby mid-game (was in playing phase)
+      const currentPhase = useGameStore.getState().phase;
+      const isReturningFromGame = currentPhase === 'playing' || currentPhase === 'loading';
       set({
         currentRoomCode: roomCode,
         roomError: null,
         pendingJoinRoom: null,
         lobbyPlayers,
+        waitingForGame: isReturningFromGame,
       });
+      if (isReturningFromGame) {
+        useGameStore.getState().reset();
+      }
       // Save session so reload reconnects
       const saved = getSavedSession();
       const token = saved.token ?? get().sessionToken;
@@ -220,6 +232,7 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
       if (assignedTasks) gameStore.setAssignedTasks(assignedTasks);
       // Enter loading phase — navigate to game route so the 3D scene starts loading
       gameStore.setPhase('loading');
+      set({ waitingForGame: false });
       const roomCode = get().currentRoomCode;
       navigateFn?.(`/game/${roomCode}`);
     });
@@ -270,6 +283,55 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
 
     socket.on('ghost:death-screen', ({ cause }) => {
       useGameStore.getState().setGhostState(true, cause);
+    });
+
+    // Meeting events
+    socket.on('meeting:started', ({ reporterId, bodyId }) => {
+      const gs = useGameStore.getState();
+      gs.setMeetingStarted(reporterId, bodyId ?? null);
+      gs.closeTaskOverlay(); // Close any open task overlay
+      // Exit pointer lock for meeting UI
+      document.exitPointerLock();
+    });
+
+    socket.on('meeting:voting-phase', () => {
+      useGameStore.getState().setMeetingPhase('voting');
+    });
+
+    socket.on('vote:confirmed', () => {
+      useGameStore.getState().setHasVoted(true);
+    });
+
+    socket.on('vote:result', ({ ejectedId, votes }) => {
+      useGameStore.getState().setVoteResult({ ejectedId, votes });
+    });
+
+    socket.on('meeting:emergency-failed', ({ reason }) => {
+      console.log(`[Meeting] Emergency failed: ${reason}`);
+    });
+
+    socket.on('game:ended', ({ winner, reason, roles, stats }) => {
+      const gs = useGameStore.getState();
+      gs.dismissDeathScreen();
+      gs.setGameEndResult(winner, reason, roles, stats);
+      gs.setPhase('results');
+      set({ readyStates: {}, waitingForGame: false });
+      // Navigate to lobby after showing results for 5 seconds
+      const roomCode = get().currentRoomCode;
+      setTimeout(() => {
+        useGameStore.getState().reset();
+        if (roomCode) navigateFn?.(`/lobby/${roomCode}`);
+      }, 5000);
+    });
+
+    socket.on('game:player-returned-to-lobby', ({ playerName }) => {
+      useGameStore.getState().addChatMessage({
+        id: `system-${Date.now()}`,
+        playerId: 'system',
+        playerName: 'Sistema',
+        text: `${playerName} voltou ao lobby.`,
+        timestamp: Date.now(),
+      });
     });
 
     socket.on('disconnect', () => {
@@ -327,6 +389,7 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
       roomError: null,
       lobbyPlayers: [],
       readyStates: {},
+      waitingForGame: false,
     });
     useGameStore.getState().reset();
     navigateFn?.('/');
@@ -343,6 +406,7 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
       roomError: null,
       lobbyPlayers: [],
       readyStates: {},
+      waitingForGame: false,
     });
     useGameStore.getState().reset();
     navigateFn?.('/');

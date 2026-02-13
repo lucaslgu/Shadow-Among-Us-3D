@@ -1,4 +1,4 @@
-import type { MazeCell, MazeLayout, WallSegment, DoorInfo, LightInfo, MazeRoomInfo, TaskStationInfo, TaskType, DecoObjectInfo, DecoType, ShelterZone, OxygenGeneratorInfo } from './maze-types.js';
+import type { MazeCell, MazeLayout, WallSegment, DoorInfo, LightInfo, MazeRoomInfo, TaskStationInfo, TaskType, DecoObjectInfo, DecoType, ShelterZone, OxygenGeneratorInfo, EmergencyButtonInfo, PipeNode, PipeConnection } from './maze-types.js';
 import { TASK_REGISTRY, TASK_TYPES_BY_DIFFICULTY } from './task-registry.js';
 
 // ═══════════════════════════════════════════════════════════════
@@ -124,132 +124,132 @@ const DOOR_WIDTH = 2.5;       // must match DOOR_GAP in MazeRenderer
 // Themed room name pool (shuffled per seed, assigned in order)
 const ROOM_NAME_POOL = [
   // Core station rooms
-  'Reator', 'Laboratório', 'Enfermaria', 'Armeiro', 'Comunicações',
-  'Controle', 'Arquivo', 'Gerador', 'Refeitório', 'Observatório',
-  'Depósito', 'Câmara Fria', 'Máquinas', 'Oficina', 'Terminal',
-  'Quarentena', 'Centro Médico', 'Almoxarifado', 'Segurança', 'Estufa',
-  'Servidor', 'Dormitório', 'Descontaminação', 'Ala Norte',
-  'Ala Sul', 'Setor Alfa', 'Setor Beta', 'Reuniões', 'Hangar', 'Criogenia',
+  'Reactor', 'Laboratory', 'Infirmary', 'Armory', 'Communications',
+  'Control', 'Archive', 'Generator', 'Cafeteria', 'Observatory',
+  'Storage', 'Cold Chamber', 'Machinery', 'Workshop', 'Terminal',
+  'Quarantine', 'Medical Center', 'Warehouse', 'Security', 'Greenhouse',
+  'Server Room', 'Dormitory', 'Decontamination', 'North Wing',
+  'South Wing', 'Sector Alpha', 'Sector Beta', 'Meeting Room', 'Hangar', 'Cryogenics',
   // Engineering & utility
-  'Propulsão', 'Navegação', 'Ponte', 'Arsenal', 'Hidroponia',
-  'Reciclagem', 'Oxigênio', 'Escotilha', 'Câmara Ar', 'Módulo Hab.',
-  'Terraço', 'Convés', 'Baia Médica', 'Garagem', 'Silo',
-  'Estúdio', 'Biblioteca', 'Câmara Escura', 'Fornalha', 'Doca',
-  'Ala Leste', 'Ala Oeste', 'Setor Gama', 'Setor Delta', 'Subestação',
-  'Antena', 'Radar', 'Capsuleiro', 'Refúgio', 'Incinerador',
-  'Blindagem', 'Caldeira', 'Extração', 'Compressor', 'Destilaria',
+  'Propulsion', 'Navigation', 'Bridge', 'Arsenal', 'Hydroponics',
+  'Recycling', 'Oxygen', 'Hatch', 'Airlock', 'Hab Module',
+  'Terrace', 'Deck', 'Med Bay', 'Garage', 'Silo',
+  'Studio', 'Library', 'Dark Chamber', 'Furnace', 'Dock',
+  'East Wing', 'West Wing', 'Sector Gamma', 'Sector Delta', 'Substation',
+  'Antenna', 'Radar', 'Pod Bay', 'Refuge', 'Incinerator',
+  'Shielding', 'Boiler', 'Extraction', 'Compressor', 'Distillery',
   // Extended wings
-  'Setor Épsilon', 'Setor Zeta', 'Setor Eta', 'Setor Theta',
-  'Ala Central', 'Ala Superior', 'Ala Inferior', 'Ala Externa',
-  'Turbina', 'Fusão', 'Ventilação', 'Filtros', 'Coleta',
-  'Fundição', 'Montagem', 'Esteira', 'Prensa', 'Solda',
-  'Acoplamento', 'Carga', 'Descarga', 'Armazém', 'Cofre',
-  'Passarela', 'Mirante', 'Vigília', 'Farol', 'Sentinela',
-  'Cisterna', 'Aqueduto', 'Câmara Térmica', 'Painel Solar', 'Bateria',
-  'Zona Zero', 'Protótipo', 'Teste', 'Simulador', 'Holodeck',
-  'Biotério', 'Viveiro', 'Herbário', 'Aquário', 'Sementeira',
-  'Enfermaria B', 'Lab. Químico', 'Lab. Físico', 'Lab. Bio',
-  'Depósito B', 'Terminal B', 'Corredor 7', 'Corredor 12',
-  'Módulo Ext.', 'Cabine', 'Cápsula', 'Berçário', 'Estoque',
+  'Sector Epsilon', 'Sector Zeta', 'Sector Eta', 'Sector Theta',
+  'Central Wing', 'Upper Wing', 'Lower Wing', 'Outer Wing',
+  'Turbine', 'Fusion', 'Ventilation', 'Filters', 'Collection',
+  'Foundry', 'Assembly', 'Conveyor', 'Press', 'Welding',
+  'Docking', 'Cargo', 'Unloading', 'Storehouse', 'Vault',
+  'Catwalk', 'Lookout', 'Watch Tower', 'Beacon', 'Sentinel',
+  'Cistern', 'Aqueduct', 'Thermal Chamber', 'Solar Panel', 'Battery',
+  'Zone Zero', 'Prototype', 'Testing', 'Simulator', 'Holodeck',
+  'Vivarium', 'Aviary', 'Herbarium', 'Aquarium', 'Seedbed',
+  'Infirmary B', 'Chem Lab', 'Physics Lab', 'Bio Lab',
+  'Storage B', 'Terminal B', 'Corridor 7', 'Corridor 12',
+  'Ext Module', 'Cabin', 'Capsule', 'Nursery', 'Stockroom',
 ];
 
 // Room name → task type mapping (thematic)
 const ROOM_TASK_MAP: Record<string, TaskType> = {
   // scanner_bioidentificacao
-  'Enfermaria': 'scanner_bioidentificacao',
-  'Centro Médico': 'scanner_bioidentificacao',
-  'Quarentena': 'scanner_bioidentificacao',
-  'Descontaminação': 'scanner_bioidentificacao',
-  'Baia Médica': 'scanner_bioidentificacao',
+  'Infirmary': 'scanner_bioidentificacao',
+  'Medical Center': 'scanner_bioidentificacao',
+  'Quarantine': 'scanner_bioidentificacao',
+  'Decontamination': 'scanner_bioidentificacao',
+  'Med Bay': 'scanner_bioidentificacao',
   // esvaziar_lixo
-  'Refeitório': 'esvaziar_lixo',
-  'Depósito': 'esvaziar_lixo',
-  'Almoxarifado': 'esvaziar_lixo',
-  'Câmara Fria': 'esvaziar_lixo',
-  'Reciclagem': 'esvaziar_lixo',
-  'Incinerador': 'esvaziar_lixo',
+  'Cafeteria': 'esvaziar_lixo',
+  'Storage': 'esvaziar_lixo',
+  'Warehouse': 'esvaziar_lixo',
+  'Cold Chamber': 'esvaziar_lixo',
+  'Recycling': 'esvaziar_lixo',
+  'Incinerator': 'esvaziar_lixo',
   // painel_energia
-  'Gerador': 'painel_energia',
-  'Subestação': 'painel_energia',
-  'Caldeira': 'painel_energia',
-  'Painel Solar': 'painel_energia',
-  'Bateria': 'painel_energia',
+  'Generator': 'painel_energia',
+  'Substation': 'painel_energia',
+  'Boiler': 'painel_energia',
+  'Solar Panel': 'painel_energia',
+  'Battery': 'painel_energia',
   // canhao_asteroides
-  'Armeiro': 'canhao_asteroides',
+  'Armory': 'canhao_asteroides',
   'Hangar': 'canhao_asteroides',
   // leitor_cartao
-  'Arquivo': 'leitor_cartao',
-  'Controle': 'leitor_cartao',
-  'Segurança': 'leitor_cartao',
-  'Reuniões': 'leitor_cartao',
-  'Navegação': 'leitor_cartao',
+  'Archive': 'leitor_cartao',
+  'Control': 'leitor_cartao',
+  'Security': 'leitor_cartao',
+  'Meeting Room': 'leitor_cartao',
+  'Navigation': 'leitor_cartao',
   // motores
-  'Máquinas': 'motores',
-  'Oficina': 'motores',
-  'Criogenia': 'motores',
+  'Machinery': 'motores',
+  'Workshop': 'motores',
+  'Cryogenics': 'motores',
   // amostra_sangue
-  'Biotério': 'amostra_sangue',
-  'Enfermaria B': 'amostra_sangue',
+  'Vivarium': 'amostra_sangue',
+  'Infirmary B': 'amostra_sangue',
   // limpar_filtro
-  'Filtros': 'limpar_filtro',
-  'Ventilação': 'limpar_filtro',
+  'Filters': 'limpar_filtro',
+  'Ventilation': 'limpar_filtro',
   // registrar_temperatura
-  'Câmara Térmica': 'registrar_temperatura',
+  'Thermal Chamber': 'registrar_temperatura',
   // alinhar_antena
-  'Farol': 'alinhar_antena',
-  'Sentinela': 'alinhar_antena',
+  'Beacon': 'alinhar_antena',
+  'Sentinel': 'alinhar_antena',
   // verificar_oxigenio
-  'Oxigênio': 'verificar_oxigenio',
+  'Oxygen': 'verificar_oxigenio',
   // enviar_relatorio
-  'Ponte': 'enviar_relatorio',
-  'Comunicações': 'enviar_relatorio',
+  'Bridge': 'enviar_relatorio',
+  'Communications': 'enviar_relatorio',
   // inspecionar_traje
-  'Dormitório': 'inspecionar_traje',
-  'Cabine': 'inspecionar_traje',
+  'Dormitory': 'inspecionar_traje',
+  'Cabin': 'inspecionar_traje',
   // etiquetar_carga
-  'Carga': 'etiquetar_carga',
-  'Descarga': 'etiquetar_carga',
-  'Armazém': 'etiquetar_carga',
+  'Cargo': 'etiquetar_carga',
+  'Unloading': 'etiquetar_carga',
+  'Storehouse': 'etiquetar_carga',
   // calibrar_bussola
-  'Observatório': 'calibrar_bussola',
+  'Observatory': 'calibrar_bussola',
   // soldar_circuito
-  'Solda': 'soldar_circuito',
-  'Montagem': 'soldar_circuito',
+  'Welding': 'soldar_circuito',
+  'Assembly': 'soldar_circuito',
   // consertar_tubulacao
-  'Cisterna': 'consertar_tubulacao',
-  'Aqueduto': 'consertar_tubulacao',
-  'Hidroponia': 'consertar_tubulacao',
+  'Cistern': 'consertar_tubulacao',
+  'Aqueduct': 'consertar_tubulacao',
+  'Hydroponics': 'consertar_tubulacao',
   // decodificar_mensagem
-  'Biblioteca': 'decodificar_mensagem',
+  'Library': 'decodificar_mensagem',
   'Terminal B': 'decodificar_mensagem',
   // reabastecer_combustivel
-  'Propulsão': 'reabastecer_combustivel',
+  'Propulsion': 'reabastecer_combustivel',
   // classificar_minerais
-  'Fundição': 'classificar_minerais',
-  'Coleta': 'classificar_minerais',
+  'Foundry': 'classificar_minerais',
+  'Collection': 'classificar_minerais',
   // ajustar_frequencia
   'Radar': 'ajustar_frequencia',
   // reconectar_fios
-  'Lab. Químico': 'reconectar_fios',
-  'Laboratório': 'reconectar_fios',
+  'Chem Lab': 'reconectar_fios',
+  'Laboratory': 'reconectar_fios',
   // analisar_dados
-  'Esteira': 'analisar_dados',
+  'Conveyor': 'analisar_dados',
   // equilibrar_carga
-  'Prensa': 'equilibrar_carga',
+  'Press': 'equilibrar_carga',
   // desativar_bomba
   'Arsenal': 'desativar_bomba',
-  'Blindagem': 'desativar_bomba',
+  'Shielding': 'desativar_bomba',
   // navegar_asteroide
-  'Mirante': 'navegar_asteroide',
-  'Vigília': 'navegar_asteroide',
+  'Lookout': 'navegar_asteroide',
+  'Watch Tower': 'navegar_asteroide',
   // reparar_reator
-  'Reator': 'reparar_reator',
-  'Fusão': 'reparar_reator',
+  'Reactor': 'reparar_reator',
+  'Fusion': 'reparar_reator',
   // hackear_terminal
-  'Servidor': 'hackear_terminal',
-  'Protótipo': 'hackear_terminal',
+  'Server Room': 'hackear_terminal',
+  'Prototype': 'hackear_terminal',
   // sincronizar_motores
-  'Turbina': 'sincronizar_motores',
+  'Turbine': 'sincronizar_motores',
   'Compressor': 'sincronizar_motores',
 };
 
@@ -349,6 +349,60 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
   }
 
   // ═══════════════════════════════════════════════════════════════
+  // Clear center 2x2 area (rows 8-9, cols 8-9) for meeting table
+  // Creates a 20x20 unit open plaza at the center of the map
+  // ═══════════════════════════════════════════════════════════════
+
+  const CENTER_ROWS = [8, 9];
+  const CENTER_COLS = [8, 9];
+  const centerCellIndices = new Set<number>();
+
+  for (const cr of CENTER_ROWS) {
+    for (const cc of CENTER_COLS) {
+      centerCellIndices.add(cr * GRID_SIZE + cc);
+    }
+  }
+
+  // Remove all internal walls between center cells
+  for (const cr of CENTER_ROWS) {
+    for (const cc of CENTER_COLS) {
+      const cell = cells[cr * GRID_SIZE + cc];
+      // South wall: if neighbor below is also center
+      if (CENTER_ROWS.includes(cr + 1) && CENTER_COLS.includes(cc)) {
+        cell.wallSouth = false;
+        cells[(cr + 1) * GRID_SIZE + cc].wallNorth = false;
+      }
+      // East wall: if neighbor right is also center
+      if (CENTER_ROWS.includes(cr) && CENTER_COLS.includes(cc + 1)) {
+        cell.wallEast = false;
+        cells[cr * GRID_SIZE + (cc + 1)].wallWest = false;
+      }
+    }
+  }
+
+  // Create entry points: remove one wall per side of the 2x2 block
+  // North side (row 8): remove north wall of (8,8) and (8,9)
+  cells[8 * GRID_SIZE + 8].wallNorth = false;
+  if (8 > 0) cells[7 * GRID_SIZE + 8].wallSouth = false;
+  cells[8 * GRID_SIZE + 9].wallNorth = false;
+  if (8 > 0) cells[7 * GRID_SIZE + 9].wallSouth = false;
+  // South side (row 9): remove south wall of (9,8) and (9,9)
+  cells[9 * GRID_SIZE + 8].wallSouth = false;
+  if (9 < GRID_SIZE - 1) cells[10 * GRID_SIZE + 8].wallNorth = false;
+  cells[9 * GRID_SIZE + 9].wallSouth = false;
+  if (9 < GRID_SIZE - 1) cells[10 * GRID_SIZE + 9].wallNorth = false;
+  // West side (col 8): remove west wall of (8,8) and (9,8)
+  cells[8 * GRID_SIZE + 8].wallWest = false;
+  if (8 > 0) cells[8 * GRID_SIZE + 7].wallEast = false;
+  cells[9 * GRID_SIZE + 8].wallWest = false;
+  if (8 > 0) cells[9 * GRID_SIZE + 7].wallEast = false;
+  // East side (col 9): remove east wall of (8,9) and (9,9)
+  cells[8 * GRID_SIZE + 9].wallEast = false;
+  if (9 < GRID_SIZE - 1) cells[8 * GRID_SIZE + 10].wallWest = false;
+  cells[9 * GRID_SIZE + 9].wallEast = false;
+  if (9 < GRID_SIZE - 1) cells[9 * GRID_SIZE + 10].wallWest = false;
+
+  // ═══════════════════════════════════════════════════════════════
   // Identify room cells (3+ walls) and create forced door edges
   // Rooms = cells enclosed by 4 walls. Cells with 3 walls get
   // their missing wall restored (with a door). Cells with <3 walls
@@ -369,6 +423,8 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
       const wc = countWalls(cell);
 
       if (wc >= 3) {
+        // Skip center cells — they are the meeting plaza
+        if (centerCellIndices.has(idx)) continue;
         roomCells.add(idx);
 
         if (wc === 3) {
@@ -742,9 +798,9 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
 
   // ── Build oxygen generators (2-3 per map, in specific rooms) ──
   const OXYGEN_ROOM_NAMES = new Set([
-    'Oxigênio', 'Gerador', 'Reator', 'Máquinas', 'Ventilação',
-    'Filtros', 'Câmara Ar', 'Propulsão', 'Subestação', 'Compressor',
-    'Caldeira', 'Servidor', 'Extração',
+    'Oxygen', 'Generator', 'Reactor', 'Machinery', 'Ventilation',
+    'Filters', 'Airlock', 'Propulsion', 'Substation', 'Compressor',
+    'Boiler', 'Server Room', 'Extraction',
   ]);
   const oxygenCandidates = rooms.filter(r => OXYGEN_ROOM_NAMES.has(r.name));
   // Fallback: if fewer than 2 candidates, pick random rooms
@@ -774,6 +830,87 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
     };
   });
 
+  // ── Build underground pipe network (6-8 nodes spread across the maze) ──
+  const PIPE_NODE_COUNT = Math.min(8, Math.max(6, Math.floor(rooms.length * 0.05)));
+  // Select rooms spread across the maze using grid sectors
+  const SECTORS = 3; // 3x3 sector grid
+  const sectorSize = GRID_SIZE / SECTORS;
+  const sectorRooms = new Map<string, typeof rooms>();
+  for (const room of rooms) {
+    const sr = Math.floor(room.row / sectorSize);
+    const sc = Math.floor(room.col / sectorSize);
+    const key = `${sr}_${sc}`;
+    const list = sectorRooms.get(key) ?? [];
+    list.push(room);
+    sectorRooms.set(key, list);
+  }
+  // Pick one room per sector first, then fill with random rooms
+  const pipeRoomCandidates: MazeRoomInfo[] = [];
+  const usedRoomIds = new Set<string>();
+  for (const [, sectorList] of sectorRooms) {
+    const shuffledSector = shuffle([...sectorList], rng);
+    if (shuffledSector.length > 0 && pipeRoomCandidates.length < PIPE_NODE_COUNT) {
+      pipeRoomCandidates.push(shuffledSector[0]);
+      usedRoomIds.add(shuffledSector[0].id);
+    }
+  }
+  // Fill remaining slots
+  const remainingRooms = shuffle([...rooms], rng).filter(r => !usedRoomIds.has(r.id));
+  while (pipeRoomCandidates.length < PIPE_NODE_COUNT && remainingRooms.length > 0) {
+    pipeRoomCandidates.push(remainingRooms.shift()!);
+  }
+
+  // Underground layout: compact grid at Y=-10, scaled down to ~40% of surface
+  const UNDERGROUND_Y = -10;
+  const UNDERGROUND_SCALE = 0.4;
+  const pipeNodes: PipeNode[] = pipeRoomCandidates.map(room => ({
+    id: `pipe_${room.row}_${room.col}`,
+    roomId: room.id,
+    roomName: room.name,
+    surfacePosition: [room.position[0], 0, room.position[2]] as [number, number, number],
+    undergroundPosition: [
+      room.position[0] * UNDERGROUND_SCALE,
+      UNDERGROUND_Y,
+      room.position[2] * UNDERGROUND_SCALE,
+    ] as [number, number, number],
+  }));
+
+  // Connect nodes with a spanning tree (MST by distance) + 2 extra edges
+  const pipeConnections: PipeConnection[] = [];
+  if (pipeNodes.length >= 2) {
+    const pipeUf = new UnionFind(pipeNodes.length);
+    // Build all edges sorted by underground distance
+    const pipeEdges: Array<{ i: number; j: number; dist: number }> = [];
+    for (let i = 0; i < pipeNodes.length; i++) {
+      for (let j = i + 1; j < pipeNodes.length; j++) {
+        const dx = pipeNodes[i].undergroundPosition[0] - pipeNodes[j].undergroundPosition[0];
+        const dz = pipeNodes[i].undergroundPosition[2] - pipeNodes[j].undergroundPosition[2];
+        pipeEdges.push({ i, j, dist: Math.sqrt(dx * dx + dz * dz) });
+      }
+    }
+    pipeEdges.sort((a, b) => a.dist - b.dist);
+
+    // Spanning tree
+    const extraEdges: typeof pipeEdges = [];
+    for (const edge of pipeEdges) {
+      if (pipeUf.union(edge.i, edge.j)) {
+        pipeConnections.push({ nodeA: pipeNodes[edge.i].id, nodeB: pipeNodes[edge.j].id });
+      } else {
+        extraEdges.push(edge);
+      }
+    }
+    // Add 2 extra connections for loops
+    for (let i = 0; i < Math.min(2, extraEdges.length); i++) {
+      pipeConnections.push({ nodeA: pipeNodes[extraEdges[i].i].id, nodeB: pipeNodes[extraEdges[i].j].id });
+    }
+  }
+
+  // ── Emergency button at the center of the map ──
+  const emergencyButton: EmergencyButtonInfo = {
+    id: 'emergency_button',
+    position: [0, 0, 0],
+  };
+
   return {
     seed,
     gridSize: GRID_SIZE,
@@ -788,6 +925,9 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
     decorations,
     shelterZones,
     oxygenGenerators,
+    emergencyButton,
+    pipeNodes,
+    pipeConnections,
   };
 }
 

@@ -107,9 +107,9 @@ export function HackearTerminalTask({ onComplete }: TaskComponentProps) {
 
   return (
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4, color: '#a855f7' }}>Hackear Terminal</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4, color: '#a855f7' }}>Hack Terminal</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 12 }}>
-        Clique nos caracteres destacados na ordem correta
+        Click the highlighted characters in the correct order
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginBottom: 12 }}>
@@ -123,7 +123,7 @@ export function HackearTerminalTask({ onComplete }: TaskComponentProps) {
 
       {error && (
         <div style={{ fontSize: 14, color: '#ef4444', fontWeight: 600, marginBottom: 8 }}>
-          Erro! Reiniciando sequência...
+          Error! Restarting sequence...
         </div>
       )}
 
@@ -177,7 +177,7 @@ export function HackearTerminalTask({ onComplete }: TaskComponentProps) {
 
       {completed && (
         <div style={{ marginTop: 16, fontSize: 18, fontWeight: 700, color: '#4ade80' }}>
-          Terminal hackeado!
+          Terminal hacked!
         </div>
       )}
     </div>

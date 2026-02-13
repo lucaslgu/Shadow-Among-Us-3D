@@ -75,9 +75,9 @@ export function EquilibrarCargaTask({ onComplete }: TaskComponentProps) {
 
   return (
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Equilibrar Carga</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Balance Cargo</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 24 }}>
-        Distribua os blocos igualmente entre os dois lados
+        Distribute the blocks equally between both sides
       </div>
 
       {/* Available blocks */}
@@ -100,7 +100,7 @@ export function EquilibrarCargaTask({ onComplete }: TaskComponentProps) {
             </button>
           </div>
         ))}
-        {available.length === 0 && <div style={{ fontSize: 13, color: '#6b6b8a' }}>Todos distribuídos</div>}
+        {available.length === 0 && <div style={{ fontSize: 13, color: '#6b6b8a' }}>All distributed</div>}
       </div>
 
       {/* Balance beam */}
@@ -158,15 +158,15 @@ export function EquilibrarCargaTask({ onComplete }: TaskComponentProps) {
 
       {/* Sums */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: 40 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: '#3b82f6' }}>Esq: {leftSum}</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#3b82f6' }}>Left: {leftSum}</div>
         <div style={{ fontSize: 16, fontWeight: 700, color: completed ? '#4ade80' : '#6b6b8a' }}>
           {completed ? '=' : tilt === 0 ? '=' : tilt > 0 ? '>' : '<'}
         </div>
-        <div style={{ fontSize: 16, fontWeight: 700, color: '#f97316' }}>Dir: {rightSum}</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#f97316' }}>Right: {rightSum}</div>
       </div>
 
       <div style={{ marginTop: 16, fontSize: 14, fontWeight: 600, color: completed ? '#4ade80' : '#6b6b8a' }}>
-        {completed ? 'Carga equilibrada!' : 'Distribua os blocos para equilibrar a balança'}
+        {completed ? 'Cargo balanced!' : 'Distribute the blocks to balance the scale'}
       </div>
     </div>
   );

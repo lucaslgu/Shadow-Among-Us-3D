@@ -716,14 +716,14 @@ function MuralhaWalls() {
   const meshRefsMap = useRef<Map<string, THREE.Mesh>>(new Map());
   const matRefsMap = useRef<Map<string, THREE.MeshStandardMaterial>>(new Map());
 
-  // Sync animation states with server data
-  const activeIds = useMemo(() => new Set(muralhaWalls.map((mw) => mw.ownerId)), [muralhaWalls]);
+  // Sync animation states with server data (keyed by wallId for multi-wall support)
+  const activeIds = useMemo(() => new Set(muralhaWalls.map((mw) => mw.wallId)), [muralhaWalls]);
 
   // Detect new walls → start rising animation
   for (const mw of muralhaWalls) {
-    if (!animStatesRef.current.has(mw.ownerId)) {
-      animStatesRef.current.set(mw.ownerId, {
-        ownerId: mw.ownerId,
+    if (!animStatesRef.current.has(mw.wallId)) {
+      animStatesRef.current.set(mw.wallId, {
+        ownerId: mw.wallId,
         start: mw.start,
         end: mw.end,
         phase: 'rising',

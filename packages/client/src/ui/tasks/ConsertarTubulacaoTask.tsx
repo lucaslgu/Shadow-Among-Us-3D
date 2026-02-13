@@ -95,9 +95,9 @@ export function ConsertarTubulacaoTask({ onComplete }: TaskComponentProps) {
 
   return (
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Consertar Tubulação</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Fix Pipes</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 24 }}>
-        Clique nos azulejos para girar e conectar os tubos
+        Click tiles to rotate and connect the pipes
       </div>
 
       <div style={{
@@ -125,7 +125,7 @@ export function ConsertarTubulacaoTask({ onComplete }: TaskComponentProps) {
       </div>
 
       <div style={{ fontSize: 14, fontWeight: 600, color: completed ? '#4ade80' : '#6b6b8a' }}>
-        {completed ? 'Tubulação conectada!' : 'Gire os azulejos para alinhar os tubos'}
+        {completed ? 'Pipes connected!' : 'Rotate tiles to align the pipes'}
       </div>
     </div>
   );

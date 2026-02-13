@@ -162,7 +162,7 @@ export function TaskOverlay() {
           zIndex: 101,
         }}
       >
-        ESC - Fechar
+        ESC - Close
       </button>
 
       {/* Task container panel */}

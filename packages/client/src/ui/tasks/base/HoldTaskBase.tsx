@@ -120,7 +120,7 @@ export function HoldTaskBase({
           cursor: completed ? 'default' : 'pointer', transition: 'all 0.2s', userSelect: 'none',
         }}
       >
-        {completed ? 'Completo!' : holding ? 'Segurando...' : 'Segure para continuar'}
+        {completed ? 'Complete!' : holding ? 'Holding...' : 'Hold to continue'}
       </button>
     </div>
   );

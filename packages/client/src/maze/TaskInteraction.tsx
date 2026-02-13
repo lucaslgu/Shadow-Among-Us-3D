@@ -11,9 +11,32 @@ const TASK_CANCEL_RANGE_SQ = 6.0 * 6.0;
 
 interface NearbyTaskInfo {
   task: TaskStationInfo;
-  isAssigned: boolean;
+  canInteract: boolean;
   state: TaskCompletionState;
   isBusy: boolean;
+}
+
+/** Check if the local player can interact with a given task */
+function canInteractWith(taskId: string): boolean {
+  const store = useGameStore.getState();
+  const { localRole, assignedTasks, mazeSnapshot } = store;
+
+  // Shadow: any uncompleted task
+  if (localRole === 'shadow') return true;
+
+  // Crew: assigned task → always yes
+  if (assignedTasks.includes(taskId)) return true;
+
+  // Crew helper: all assigned tasks completed → can help with any pending task
+  if (mazeSnapshot && assignedTasks.length > 0) {
+    const allMyDone = assignedTasks.every((tid) => {
+      const ts = mazeSnapshot.taskStates[tid];
+      return ts?.completionState === 'completed';
+    });
+    if (allMyDone) return true;
+  }
+
+  return false;
 }
 
 export function TaskInteraction() {
@@ -42,9 +65,8 @@ export function TaskInteraction() {
         const task = nearestTaskRef.current;
         if (!task) return;
 
-        // Only interact with assigned tasks
-        const assigned = useGameStore.getState().assignedTasks;
-        if (!assigned.includes(task.id)) return;
+        // Check if player can interact (shadow any-task, crew assigned, crew helper)
+        if (!canInteractWith(task.id)) return;
 
         const snap = useGameStore.getState().mazeSnapshot;
         const taskState = snap?.taskStates[task.id];
@@ -133,11 +155,11 @@ export function TaskInteraction() {
         const state: TaskCompletionState = ts?.completionState ?? 'pending';
         const localId = useGameStore.getState().localPlayerId;
         const isBusy = !!(ts?.activePlayerId && ts.activePlayerId !== localId);
-        const isAssigned = assignedTasks.includes(best.id);
+        const interact = canInteractWith(best.id);
 
-        setNearbyTask({ task: best, isAssigned, state, isBusy });
+        setNearbyTask({ task: best, canInteract: interact, state, isBusy });
 
-        if (isAssigned) {
+        if (interact) {
           useGameStore.getState().setNearestInteractTask({
             displayName: best.displayName,
             taskType: best.taskType,
@@ -154,13 +176,13 @@ export function TaskInteraction() {
       const state: TaskCompletionState = ts?.completionState ?? 'pending';
       const localId = useGameStore.getState().localPlayerId;
       const isBusy = !!(ts?.activePlayerId && ts.activePlayerId !== localId);
-      const isAssigned = assignedTasks.includes(best.id);
+      const interact = canInteractWith(best.id);
       const prev = nearbyTask;
 
-      if (!prev || prev.state !== state || prev.isBusy !== isBusy || prev.isAssigned !== isAssigned) {
-        setNearbyTask({ task: best, isAssigned, state, isBusy });
+      if (!prev || prev.state !== state || prev.isBusy !== isBusy || prev.canInteract !== interact) {
+        setNearbyTask({ task: best, canInteract: interact, state, isBusy });
 
-        if (isAssigned) {
+        if (interact) {
           useGameStore.getState().setNearestInteractTask({
             displayName: best.displayName,
             taskType: best.taskType,
@@ -192,14 +214,14 @@ export function TaskInteraction() {
   // ── 3D floating prompt (like DoorInteraction) ──
   if (!nearbyTask) return null;
 
-  const { task, isAssigned, state, isBusy } = nearbyTask;
+  const { task, canInteract: interact, state, isBusy } = nearbyTask;
   const isCompleted = state === 'completed';
 
   const borderColor = isCompleted
     ? '#4ade80'
     : isBusy
     ? '#fbbf24'
-    : isAssigned
+    : interact
     ? '#44aaff'
     : '#6b6b8a';
 
@@ -233,9 +255,9 @@ export function TaskInteraction() {
             </div>
           ) : isBusy ? (
             <div style={{ fontSize: 12, color: '#fbbf24', fontWeight: 600 }}>
-              Em uso por outro jogador
+              In use by another player
             </div>
-          ) : isAssigned ? (
+          ) : interact ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
               <span
                 style={{

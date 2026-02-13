@@ -4,8 +4,8 @@ import type { TaskComponentProps } from '../TaskOverlay.js';
 export function VerificarOxigenioTask({ onComplete, onCancel }: TaskComponentProps) {
   return (
     <HoldTaskBase
-      title="Verificar Oxigênio"
-      subtitle="Segure a válvula para verificar o nível"
+      title="Check Oxygen"
+      subtitle="Hold the valve to check the level"
       holdDuration={2000}
       icon="O&#8322;"
       completedIcon="&#10003;"

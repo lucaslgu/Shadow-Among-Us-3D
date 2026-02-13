@@ -72,7 +72,7 @@ export function SequenceTaskBase({
 
       {completed ? (
         <div style={{ fontSize: 18, fontWeight: 700, color: '#4ade80' }}>
-          Concluído!
+          Done!
         </div>
       ) : (
         <button onClick={advanceStep} style={{
@@ -82,7 +82,7 @@ export function SequenceTaskBase({
           background: 'rgba(68,170,255,0.12)', color: '#44aaff',
           cursor: 'pointer', transition: 'all 0.2s',
         }}>
-          {steps[currentStep]?.buttonText ?? steps[currentStep]?.label ?? 'Próximo'}
+          {steps[currentStep]?.buttonText ?? steps[currentStep]?.label ?? 'Next'}
         </button>
       )}
     </div>

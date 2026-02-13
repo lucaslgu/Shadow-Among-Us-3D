@@ -190,13 +190,13 @@ export function SoldarCircuitoTask({ onComplete }: TaskComponentProps) {
 
   return (
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Soldar Circuito</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Solder Circuit</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 16 }}>
-        Arraste ao longo de cada trilha quebrada para soldá-la
+        Drag along each broken trace to solder it
       </div>
 
       <div style={{ fontSize: 14, color: '#44aaff', fontWeight: 600, marginBottom: 12 }}>
-        Trilhas: {doneCount}/{TRACE_COUNT}
+        Traces: {doneCount}/{TRACE_COUNT}
       </div>
 
       <canvas
@@ -215,7 +215,7 @@ export function SoldarCircuitoTask({ onComplete }: TaskComponentProps) {
 
       {completed && (
         <div style={{ marginTop: 16, fontSize: 18, fontWeight: 700, color: '#4ade80' }}>
-          Circuito reparado!
+          Circuit repaired!
         </div>
       )}
     </div>

@@ -174,7 +174,7 @@ export function TaskGuide() {
   }, []);
 
   useFrame((_, delta) => {
-    if (!mazeLayout || !mazeSnapshot || assignedTasks.length === 0 || isGhost) {
+    if (!mazeLayout || !mazeSnapshot || isGhost) {
       geometry.setDrawRange(0, 0);
       return;
     }
@@ -188,23 +188,67 @@ export function TaskGuide() {
     }
     timerRef.current = 0;
 
-    const { localPosition } = useGameStore.getState();
+    const store = useGameStore.getState();
+    const { localPosition, localRole, selectedGuideTaskId } = store;
     const [px, , pz] = localPosition;
     const { gridSize, cellSize, cells, tasks } = mazeLayout;
 
-    // Find uncompleted assigned tasks and their cells
+    // Build target list depending on role and state
     const targetCells = new Set<string>();
     const cellToTask = new Map<string, typeof tasks[0]>();
 
-    for (const taskId of assignedTasks) {
-      const ts = mazeSnapshot.taskStates[taskId];
-      if (ts?.completionState === 'completed') continue;
-      const task = tasks.find((t) => t.id === taskId);
-      if (!task) continue;
-      const [tr, tc] = worldToCell(task.position[0], task.position[2], gridSize, cellSize);
-      const key = `${tr}_${tc}`;
-      targetCells.add(key);
-      cellToTask.set(key, task);
+    const isShadow = localRole === 'shadow';
+    const allMyDone = assignedTasks.length > 0 && assignedTasks.every((tid) => {
+      const ts = mazeSnapshot.taskStates[tid];
+      return ts?.completionState === 'completed';
+    });
+
+    if (isShadow && selectedGuideTaskId) {
+      // Shadow: route to a specific manually-selected task
+      const ts = mazeSnapshot.taskStates[selectedGuideTaskId];
+      if (ts?.completionState !== 'completed') {
+        const task = tasks.find((t) => t.id === selectedGuideTaskId);
+        if (task) {
+          const [tr, tc] = worldToCell(task.position[0], task.position[2], gridSize, cellSize);
+          const key = `${tr}_${tc}`;
+          targetCells.add(key);
+          cellToTask.set(key, task);
+        }
+      }
+    } else if (isShadow) {
+      // Shadow without selection: route to nearest uncompleted assigned task (fake tasks)
+      for (const taskId of assignedTasks) {
+        const ts = mazeSnapshot.taskStates[taskId];
+        if (ts?.completionState === 'completed') continue;
+        const task = tasks.find((t) => t.id === taskId);
+        if (!task) continue;
+        const [tr, tc] = worldToCell(task.position[0], task.position[2], gridSize, cellSize);
+        const key = `${tr}_${tc}`;
+        targetCells.add(key);
+        cellToTask.set(key, task);
+      }
+    } else if (allMyDone) {
+      // Crew helper: route to any global uncompleted task
+      for (const task of tasks) {
+        const ts = mazeSnapshot.taskStates[task.id];
+        if (ts?.completionState === 'completed') continue;
+        const [tr, tc] = worldToCell(task.position[0], task.position[2], gridSize, cellSize);
+        const key = `${tr}_${tc}`;
+        targetCells.add(key);
+        cellToTask.set(key, task);
+      }
+    } else {
+      // Crew: route to uncompleted assigned tasks
+      for (const taskId of assignedTasks) {
+        const ts = mazeSnapshot.taskStates[taskId];
+        if (ts?.completionState === 'completed') continue;
+        const task = tasks.find((t) => t.id === taskId);
+        if (!task) continue;
+        const [tr, tc] = worldToCell(task.position[0], task.position[2], gridSize, cellSize);
+        const key = `${tr}_${tc}`;
+        targetCells.add(key);
+        cellToTask.set(key, task);
+      }
     }
 
     if (targetCells.size === 0) {
@@ -283,7 +327,7 @@ export function TaskGuide() {
   // Store ref for useFrame access
   lineObjRef.current = lineObject;
 
-  if (!mazeLayout || assignedTasks.length === 0) return null;
+  if (!mazeLayout) return null;
 
   return <primitive object={lineObject} />;
 }

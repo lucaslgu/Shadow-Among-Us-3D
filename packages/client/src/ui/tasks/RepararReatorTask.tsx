@@ -32,8 +32,8 @@ export function RepararReatorTask({ onComplete, onCancel }: TaskComponentProps) 
 
       {phase === 1 && (
         <MatchTaskBase
-          title="Reparar Reator — Fase 1"
-          subtitle="Alinhe os interruptores com o padrão"
+          title="Repair Reactor — Phase 1"
+          subtitle="Align the switches with the pattern"
           itemCount={4}
           generateTarget={generateSwitchPattern}
           labels={['OFF', 'ON']}
@@ -44,8 +44,8 @@ export function RepararReatorTask({ onComplete, onCancel }: TaskComponentProps) 
 
       {phase === 2 && (
         <FillGaugeTaskBase
-          title="Reparar Reator — Fase 2"
-          subtitle="Encha o gauge na zona estreita (80-95%)"
+          title="Repair Reactor — Phase 2"
+          subtitle="Fill the gauge in the narrow zone (80-95%)"
           gauges={[{ targetMin: 0.80, targetMax: 0.95, fillRate: 0.22 }]}
           onComplete={() => setPhase(3)}
           onCancel={onCancel}
@@ -54,8 +54,8 @@ export function RepararReatorTask({ onComplete, onCancel }: TaskComponentProps) 
 
       {phase === 3 && (
         <HoldTaskBase
-          title="Reparar Reator — Fase 3"
-          subtitle="Segure para estabilizar o reator"
+          title="Repair Reactor — Phase 3"
+          subtitle="Hold to stabilize the reactor"
           holdDuration={4000}
           icon="&#9762;"
           completedIcon="&#10003;"

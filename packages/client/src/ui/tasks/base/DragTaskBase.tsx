@@ -52,10 +52,10 @@ export function DragTaskBase({
 
     if (progress >= successThreshold) {
       if (elapsed < minTime) {
-        setFeedback('Muito rápido! Arraste mais devagar.');
+        setFeedback('Too fast! Drag slower.');
         setCardX(0);
       } else if (elapsed > maxTime) {
-        setFeedback('Muito devagar! Arraste mais rápido.');
+        setFeedback('Too slow! Drag faster.');
         setCardX(0);
       } else {
         setCompleted(true);
@@ -116,10 +116,10 @@ export function DragTaskBase({
       )}
 
       {completed ? (
-        <div style={{ fontSize: 18, fontWeight: 700, color: '#4ade80' }}>Aceito!</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: '#4ade80' }}>Accepted!</div>
       ) : (
         <div style={{ fontSize: 13, color: '#6b6b8a' }}>
-          Arraste da esquerda para a direita na velocidade certa
+          Drag from left to right at the right speed
         </div>
       )}
     </div>

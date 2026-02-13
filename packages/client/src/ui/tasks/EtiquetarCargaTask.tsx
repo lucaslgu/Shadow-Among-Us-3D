@@ -2,7 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import type { TaskComponentProps } from '../TaskOverlay.js';
 
 const COLORS = ['#ef4444', '#3b82f6', '#eab308'];
-const COLOR_NAMES = ['Vermelho', 'Azul', 'Amarelo'];
+const COLOR_NAMES = ['Red', 'Blue', 'Yellow'];
 
 export function EtiquetarCargaTask({ onComplete }: TaskComponentProps) {
   const [tags] = useState(() => {
@@ -33,9 +33,9 @@ export function EtiquetarCargaTask({ onComplete }: TaskComponentProps) {
 
   return (
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Etiquetar Carga</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Label Cargo</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 24 }}>
-        Arraste cada etiqueta para a caixa da cor correspondente
+        Drag each label to the matching color box
       </div>
 
       {/* Tags row */}
@@ -88,7 +88,7 @@ export function EtiquetarCargaTask({ onComplete }: TaskComponentProps) {
       </div>
 
       <div style={{ marginTop: 24, fontSize: 14, fontWeight: 600, color: completed ? '#4ade80' : '#6b6b8a' }}>
-        {completed ? 'Carga etiquetada!' : `${placedCount}/${tags.length} etiquetas colocadas`}
+        {completed ? 'Cargo labeled!' : `${placedCount}/${tags.length} labels placed`}
       </div>
     </div>
   );

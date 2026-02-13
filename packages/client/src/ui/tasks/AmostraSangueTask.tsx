@@ -4,8 +4,8 @@ import type { TaskComponentProps } from '../TaskOverlay.js';
 export function AmostraSangueTask({ onComplete, onCancel }: TaskComponentProps) {
   return (
     <HoldTaskBase
-      title="Coleta de Sangue"
-      subtitle="Segure para coletar a amostra"
+      title="Blood Sample"
+      subtitle="Hold to collect the sample"
       holdDuration={2500}
       icon="&#128137;"
       completedIcon="&#10003;"

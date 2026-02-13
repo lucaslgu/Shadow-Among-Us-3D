@@ -83,9 +83,10 @@ export interface GamePlayerState {
   // Hacker tracking (revert on deactivation)
   hackerLockedDoors: string[];
   hackerToggledLights: string[];
-  // Muralha (barrier wall)
-  muralhaWallActive: boolean;
-  muralhaWall: { start: [number, number]; end: [number, number] } | null;
+  hackerToggledWalls: string[];
+  // Muralha (barrier walls — up to 4 simultaneous)
+  muralhaWalls: Array<{ wallId: string; start: [number, number]; end: [number, number]; expiresAt: number }>;
+  muralhaNextWallId: number;
   // Health
   health: number;
   maxHealth: number;
@@ -103,6 +104,12 @@ export interface GamePlayerState {
   ghostPossessInput: { forward: boolean; backward: boolean; left: boolean; right: boolean; mouseX: number } | null;
   ghostPossessEnd: number;
   ghostPossessCooldownEnd: number;
+  // Underground pipe system
+  isUnderground: boolean;
+  currentPipeNodeId: string | null;
+  // Meeting
+  emergencyButtonCooldownEnd: number;
+  emergencyButtonUsesLeft: number;
 }
 
 // ===== Era cycle (scenario-based) =====
@@ -151,6 +158,62 @@ function seededHash(str: string, seed: number): number {
 
 const DOOR_INTERACT_RANGE = 3.5;
 
+// ===== Dead Bodies =====
+export interface DeadBody {
+  bodyId: string;
+  victimId: string;      // socketId
+  victimName: string;
+  victimColor: string;
+  position: [number, number, number];
+  reported: boolean;
+}
+
+let bodyCounter = 0;
+export function createDeadBody(victim: GamePlayerState): DeadBody {
+  return {
+    bodyId: `body_${++bodyCounter}`,
+    victimId: victim.socketId,
+    victimName: victim.name,
+    victimColor: victim.color,
+    position: [...victim.position],
+    reported: false,
+  };
+}
+
+// ===== Game Over Check =====
+export function checkGameOver(
+  gamePlayers: Map<string, GamePlayerState>,
+  mazeSnapshot: MazeSnapshot,
+): { gameOver: boolean; winner?: 'crew' | 'shadow'; reason?: string } {
+  let aliveCrew = 0;
+  let aliveShadow = 0;
+  for (const [, gp] of gamePlayers) {
+    if (!gp.isAlive) continue;
+    if (gp.role === 'crew') aliveCrew++;
+    else if (gp.role === 'shadow') aliveShadow++;
+  }
+
+  // All shadows eliminated
+  if (aliveShadow === 0) {
+    return { gameOver: true, winner: 'crew', reason: 'All impostors were eliminated!' };
+  }
+
+  // Crew <= shadows (shadows win)
+  if (aliveCrew <= aliveShadow && aliveShadow > 0) {
+    return { gameOver: true, winner: 'shadow', reason: 'The impostors have overtaken the crew!' };
+  }
+
+  // All tasks completed
+  const allCompleted = Object.values(mazeSnapshot.taskStates).every(
+    (ts) => ts.completionState === 'completed',
+  );
+  if (allCompleted) {
+    return { gameOver: true, winner: 'crew', reason: 'All tasks have been completed!' };
+  }
+
+  return { gameOver: false };
+}
+
 export function startGameLoop(
   io: Server<ClientEvents, ServerEvents>,
   roomCode: string,
@@ -158,7 +221,9 @@ export function startGameLoop(
   mazeLayout: MazeLayout,
   mazeSnapshot: MazeSnapshot,
   cosmicScenario: CosmicScenario,
+  deadBodies: Map<string, DeadBody>,
   onEraChange?: (era: string) => void,
+  onCheckEndConditions?: () => void,
 ): ReturnType<typeof setInterval> {
   let tickSeq = 0;
   const gameStartTime = Date.now();
@@ -186,11 +251,24 @@ export function startGameLoop(
       mazeSnapshot.dynamicWallStates[wallId] = t < 0.6; // 60% closed, 40% open
     }
 
+    // ── Expire muralha walls + recharge charges ──
+    for (const [, gp] of gamePlayers) {
+      if (gp.muralhaWalls.length > 0) {
+        gp.muralhaWalls = gp.muralhaWalls.filter(w => w.expiresAt > now);
+      }
+      // Recharge MURALHA charges when cooldown expires and charges < max
+      if (gp.power === PowerType.MURALHA &&
+          gp.powerUsesLeft < POWER_CONFIGS[PowerType.MURALHA].usesPerMatch &&
+          !gp.powerActive && now >= gp.powerCooldownEnd) {
+        gp.powerUsesLeft = POWER_CONFIGS[PowerType.MURALHA].usesPerMatch;
+      }
+    }
+
     // ── Collect active muralha walls ──
     const muralhaWalls: MuralhaWall[] = [];
     for (const [, gp] of gamePlayers) {
-      if (gp.muralhaWallActive && gp.muralhaWall) {
-        muralhaWalls.push({ ownerId: gp.socketId, ...gp.muralhaWall });
+      for (const wall of gp.muralhaWalls) {
+        muralhaWalls.push({ wallId: wall.wallId, ownerId: gp.socketId, start: wall.start, end: wall.end });
       }
     }
 
@@ -492,10 +570,14 @@ export function startGameLoop(
         gp.isAlive = false;
         gp.isGhost = true;
         const deathCause = sources.join('+') || 'environment';
+        // Create dead body
+        const body = createDeadBody(gp);
+        deadBodies.set(body.bodyId, body);
         io.to(gp.socketId).emit('ghost:death-screen', { cause: deathCause, killerId: null });
         io.to(roomCode).emit('kill:occurred', {
           killerId: gp.socketId,
           victimId: gp.socketId,
+          bodyId: body.bodyId,
           bodyPosition: { x: gp.position[0], y: gp.position[1], z: gp.position[2] },
         });
       }
@@ -531,6 +613,8 @@ export function startGameLoop(
           ? (findSocketIdByToken(gamePlayers, gp.ghostPossessTargetToken) ?? null)
           : null,
         powerUsesLeft: gp.powerUsesLeft,
+        isUnderground: gp.isUnderground,
+        currentPipeNodeId: gp.currentPipeNodeId,
       };
     }
 
@@ -555,9 +639,21 @@ export function startGameLoop(
         }
         return null;
       })(),
+      bodies: (() => {
+        const arr: Array<{ bodyId: string; victimId: string; victimColor: string; position: [number, number, number] }> = [];
+        for (const [, b] of deadBodies) {
+          if (!b.reported) {
+            arr.push({ bodyId: b.bodyId, victimId: b.victimId, victimColor: b.victimColor, position: b.position });
+          }
+        }
+        return arr;
+      })(),
     };
 
     io.to(roomCode).emit('game:state-snapshot', snapshot);
+
+    // Check game end conditions after each tick
+    onCheckEndConditions?.();
   }, TICK_INTERVAL);
 
   return interval;
@@ -634,6 +730,12 @@ export function activatePower(
       break;
 
     case PowerType.MURALHA: {
+      // Check charges remaining
+      if (gp.powerUsesLeft <= 0) {
+        gp.powerActive = false;
+        return false;
+      }
+
       let cx: number;
       let cz: number;
       let dirX: number;
@@ -664,11 +766,23 @@ export function activatePower(
       const perpZ = dirX;
       const halfLen = 3; // 6 units wide
 
-      gp.muralhaWallActive = true;
-      gp.muralhaWall = {
+      const wallId = `${gp.socketId}_${gp.muralhaNextWallId++}`;
+      gp.muralhaWalls.push({
+        wallId,
         start: [cx - perpX * halfLen, cz - perpZ * halfLen],
         end: [cx + perpX * halfLen, cz + perpZ * halfLen],
-      };
+        expiresAt: now + effectiveDuration,
+      });
+
+      gp.powerUsesLeft--;
+      gp.powerActive = false; // instant placement (like teleport)
+      if (gp.powerUsesLeft > 0) {
+        // Short cooldown between charges (2s)
+        gp.powerCooldownEnd = now + 2000;
+      } else {
+        // Full cooldown after all charges used
+        gp.powerCooldownEnd = now + config.cooldown;
+      }
       break;
     }
 
@@ -770,6 +884,7 @@ export function activatePower(
       // Just mark as active — hacking done via 'hacker:action' events
       gp.hackerLockedDoors = [];
       gp.hackerToggledLights = [];
+      gp.hackerToggledWalls = [];
       break;
 
     default:
@@ -830,8 +945,8 @@ export function deactivatePower(
       break;
 
     case PowerType.MURALHA:
-      gp.muralhaWallActive = false;
-      gp.muralhaWall = null;
+      // Clear all active walls (safety fallback — normally walls expire individually)
+      gp.muralhaWalls = [];
       break;
 
     case PowerType.MIND_CONTROLLER:
@@ -852,9 +967,14 @@ export function deactivatePower(
         for (const lightId of gp.hackerToggledLights) {
           mazeSnapshot.lightStates[lightId] = true;
         }
+        for (const wallId of gp.hackerToggledWalls) {
+          // Revert to closed (default state)
+          mazeSnapshot.dynamicWallStates[wallId] = true;
+        }
       }
       gp.hackerLockedDoors = [];
       gp.hackerToggledLights = [];
+      gp.hackerToggledWalls = [];
       break;
 
     default:
@@ -913,36 +1033,37 @@ export function attemptKill(
   gamePlayers: Map<string, GamePlayerState>,
   targetId: string,
   killCooldown: number,
-): boolean {
+  deadBodies: Map<string, DeadBody>,
+): { success: boolean; bodyId?: string } {
   // Only shadows can kill
-  if (attacker.role !== 'shadow') return false;
-  if (!attacker.isAlive) return false;
+  if (attacker.role !== 'shadow') return { success: false };
+  if (!attacker.isAlive) return { success: false };
 
   // Kill cooldown check
   const now = Date.now();
-  if (now < attacker.killCooldownEnd) return false;
+  if (now < attacker.killCooldownEnd) return { success: false };
 
   // Find target by socketId
   let target: GamePlayerState | null = null;
   for (const [, gp] of gamePlayers) {
     if (gp.socketId === targetId) { target = gp; break; }
   }
-  if (!target || !target.isAlive || target.isGhost) return false;
+  if (!target || !target.isAlive || target.isGhost) return { success: false };
 
   // Target is immune if impermeable
-  if (target.isImpermeable) return false;
+  if (target.isImpermeable) return { success: false };
 
   // Target has shield (Medic power)
   if (target.hasShield) {
     target.hasShield = false;
     attacker.killCooldownEnd = now + killCooldown;
-    return false;
+    return { success: false };
   }
 
   // Range check
   const dx = target.position[0] - attacker.position[0];
   const dz = target.position[2] - attacker.position[2];
-  if (dx * dx + dz * dz > KILL_RANGE_SQ) return false;
+  if (dx * dx + dz * dz > KILL_RANGE_SQ) return { success: false };
 
   // Execute kill
   target.isAlive = false;
@@ -950,14 +1071,19 @@ export function attemptKill(
   target.health = 0;
   attacker.killCooldownEnd = now + killCooldown;
 
+  // Create dead body
+  const body = createDeadBody(target);
+  deadBodies.set(body.bodyId, body);
+
   io.to(target.socketId).emit('ghost:death-screen', { cause: 'killed', killerId: attacker.socketId });
   io.to(roomCode).emit('kill:occurred', {
     killerId: attacker.socketId,
     victimId: target.socketId,
+    bodyId: body.bodyId,
     bodyPosition: { x: target.position[0], y: target.position[1], z: target.position[2] },
   });
 
-  return true;
+  return { success: true, bodyId: body.bodyId };
 }
 
 // ===== Door Interaction (player presses E near a door) =====
@@ -1000,9 +1126,19 @@ export function startTask(
 ): { ok: boolean; reason: string } {
   const task = mazeLayout.tasks.find((t) => t.id === taskId);
   if (!task) return { ok: false, reason: 'task_not_found' };
-  if (!gp.assignedTasks.includes(taskId)) {
-    console.log(`[TASK] startTask REJECTED for ${gp.name}: task ${taskId} not in assignedTasks [${gp.assignedTasks.join(',')}]`);
-    return { ok: false, reason: 'not_assigned' };
+
+  // Shadow: can interact with ANY task (fake interaction, no global progress)
+  if (gp.role === 'shadow') {
+    // Skip assignment check entirely
+  }
+  // Crew: must be assigned OR have completed all their own tasks (helper mode)
+  else if (!gp.assignedTasks.includes(taskId)) {
+    const allMyDone = gp.assignedTasks.every(tid =>
+      mazeSnapshot.taskStates[tid]?.completionState === 'completed');
+    if (!allMyDone) {
+      console.log(`[TASK] startTask REJECTED for ${gp.name}: task ${taskId} not in assignedTasks [${gp.assignedTasks.join(',')}]`);
+      return { ok: false, reason: 'not_assigned' };
+    }
   }
   const taskState = mazeSnapshot.taskStates[taskId];
   if (!taskState) return { ok: false, reason: 'no_task_state' };

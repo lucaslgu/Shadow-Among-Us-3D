@@ -82,14 +82,14 @@ export function DesativarBombaTask({ onComplete }: TaskComponentProps) {
 
   return (
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4, color: '#ef4444' }}>Desativar Bomba</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4, color: '#ef4444' }}>Defuse Bomb</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 16 }}>
-        {phase === 'showing' ? 'Memorize a ordem dos fios' : 'Corte os fios na ordem memorizada!'}
+        {phase === 'showing' ? 'Memorize the wire order' : 'Cut the wires in the memorized order!'}
       </div>
 
       {error && (
         <div style={{ fontSize: 14, color: '#ef4444', fontWeight: 600, marginBottom: 8 }}>
-          Errou! Sequência reiniciada
+          Wrong! Sequence restarted
         </div>
       )}
 
@@ -157,7 +157,7 @@ export function DesativarBombaTask({ onComplete }: TaskComponentProps) {
       </div>
 
       <div style={{ fontSize: 16, fontWeight: 700, color: completed ? '#4ade80' : '#6b6b8a' }}>
-        {completed ? 'Bomba desativada!' : phase === 'cutting' ? `${cutStep}/${WIRE_COUNT} cortados` : ''}
+        {completed ? 'Bomb defused!' : phase === 'cutting' ? `${cutStep}/${WIRE_COUNT} cut` : ''}
       </div>
     </div>
   );

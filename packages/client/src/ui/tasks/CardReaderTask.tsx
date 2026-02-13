@@ -65,11 +65,11 @@ export function CardReaderTask({ onComplete, onCancel }: TaskComponentProps) {
             // Check speed
             if (elapsed < MIN_TIME) {
               setStatus('fail');
-              setFailMessage('Muito r\u00e1pido! Arraste mais devagar.');
+              setFailMessage('Too fast! Drag slower.');
               setTimeout(resetCard, 1200);
             } else if (elapsed > MAX_TIME) {
               setStatus('fail');
-              setFailMessage('Muito devagar! Arraste mais r\u00e1pido.');
+              setFailMessage('Too slow! Drag faster.');
               setTimeout(resetCard, 1200);
             } else {
               // Success!
@@ -80,7 +80,7 @@ export function CardReaderTask({ onComplete, onCancel }: TaskComponentProps) {
           } else {
             // Didn't drag far enough
             setStatus('fail');
-            setFailMessage('Arraste at\u00e9 o final.');
+            setFailMessage('Drag all the way to the end.');
             setTimeout(resetCard, 800);
           }
 
@@ -101,10 +101,10 @@ export function CardReaderTask({ onComplete, onCancel }: TaskComponentProps) {
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
       {/* Title */}
       <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-        Leitor de Cart&atilde;o
+        Card Reader
       </div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 32 }}>
-        Arraste o cart&atilde;o da esquerda para a direita
+        Drag the card from left to right
       </div>
 
       {/* Card track */}
@@ -228,12 +228,12 @@ export function CardReaderTask({ onComplete, onCancel }: TaskComponentProps) {
         }}
       >
         {status === 'success'
-          ? 'Cart\u00e3o aceito!'
+          ? 'Card accepted!'
           : status === 'fail'
             ? failMessage
             : dragging
-              ? `${progressPct}%${isInSuccessZone ? ' - Solte agora!' : ''}`
-              : 'Clique e arraste o cart\u00e3o'}
+              ? `${progressPct}%${isInSuccessZone ? ' - Release now!' : ''}`
+              : 'Click and drag the card'}
       </div>
 
       {/* Speed guide */}
@@ -245,7 +245,7 @@ export function CardReaderTask({ onComplete, onCancel }: TaskComponentProps) {
           fontFamily: "'Courier New', monospace",
         }}
       >
-        Velocidade: nem muito r&aacute;pido, nem muito devagar
+        Speed: not too fast, not too slow
       </div>
     </div>
   );

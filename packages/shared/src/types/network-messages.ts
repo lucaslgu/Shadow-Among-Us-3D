@@ -67,7 +67,7 @@ export interface ClientEvents {
   'vote:cast': (data: { targetId: string | null }) => void;
   'chat:message': (data: { text: string }) => void;
   'door:interact': (data: { doorId: string }) => void;
-  'hacker:action': (data: { targetType: 'door' | 'light'; targetId: string }) => void;
+  'hacker:action': (data: { targetType: 'door' | 'light' | 'wall'; targetId: string }) => void;
   'task:start': (data: { taskId: string }) => void;
   'task:complete': (data: { taskId: string }) => void;
   'task:cancel': (data: { taskId: string }) => void;
@@ -84,6 +84,12 @@ export interface ClientEvents {
   'ghost:task-start': (data: { taskId: string }) => void;
   'ghost:task-complete': (data: { taskId: string }) => void;
   'ghost:task-cancel': (data: { taskId: string }) => void;
+  // Pipe system events
+  'pipe:enter': (data: { pipeNodeId: string }) => void;
+  'pipe:exit': (data: { pipeNodeId: string }) => void;
+  'pipe:travel': (data: { destinationNodeId: string }) => void;
+  // Death choice (ghost, lobby, leave)
+  'death:choice': (data: { choice: 'ghost' | 'lobby' | 'leave' }) => void;
 }
 
 // ===== Server -> Client Events =====
@@ -108,10 +114,19 @@ export interface ServerEvents {
   'power:ended': (data: { playerId: string; powerType: PowerType }) => void;
   'power:nearby-targets': (data: { targets: NearbyTarget[] }) => void;
   'power:no-targets': () => void;
-  'kill:occurred': (data: { killerId: string; victimId: string; bodyPosition: Vec3 }) => void;
+  'kill:occurred': (data: { killerId: string; victimId: string; bodyId: string; bodyPosition: Vec3 }) => void;
   'meeting:started': (data: { reporterId: string; bodyId?: string }) => void;
+  'meeting:voting-phase': () => void;
+  'meeting:emergency-failed': (data: { reason: string }) => void;
+  'vote:confirmed': () => void;
   'vote:result': (data: { ejectedId: string | null; votes: Record<string, string | null> }) => void;
-  'game:over': (data: { winner: 'crew' | 'shadow'; roles: Record<string, string> }) => void;
+  'game:ended': (data: {
+    winner: 'crew' | 'shadow';
+    reason: string;
+    roles: Record<string, { name: string; color: string; role: string }>;
+    stats: { tasksCompleted: number; totalTasks: number; gameDurationSec: number };
+  }) => void;
+  'game:player-returned-to-lobby': (data: { playerName: string }) => void;
   'chat:message': (data: { playerId: string; text: string }) => void;
   'task:started': (data: { taskId: string; playerId: string }) => void;
   'task:completed': (data: { taskId: string; playerId: string }) => void;
@@ -147,6 +162,8 @@ export interface PlayerSnapshot {
   isGhost: boolean;
   ghostPossessTargetId: string | null;
   powerUsesLeft: number;
+  isUnderground: boolean;
+  currentPipeNodeId: string | null;
 }
 
 export interface StateSnapshot {
@@ -159,6 +176,7 @@ export interface StateSnapshot {
   eraDescription?: string;
   shipOxygen?: number;             // 0-100 ship oxygen level
   oxygenRefillPlayerId?: string | null; // socketId of player currently refilling
+  bodies?: Array<{ bodyId: string; victimId: string; victimColor: string; position: [number, number, number] }>;
 }
 
 export interface SerializedGameState {

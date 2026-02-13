@@ -49,15 +49,15 @@ export function ReconectarFiosTask({ onComplete }: TaskComponentProps) {
 
   return (
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Reconectar Fios</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Reconnect Wires</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 24 }}>
-        Conecte cada fio à porta da mesma cor
+        Connect each wire to the matching color port
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: 80, position: 'relative' }}>
         {/* Left: Wires */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ fontSize: 12, color: '#6b6b8a', marginBottom: 4, fontWeight: 600 }}>FIOS</div>
+          <div style={{ fontSize: 12, color: '#6b6b8a', marginBottom: 4, fontWeight: 600 }}>WIRES</div>
           {Array.from({ length: WIRE_COUNT }, (_, i) => {
             const isConnected = connections[i] !== null;
             const isSelected = selectedWire === i;
@@ -74,7 +74,7 @@ export function ReconectarFiosTask({ onComplete }: TaskComponentProps) {
                   opacity: isConnected ? 0.5 : 1,
                 }}
               >
-                {isConnected ? '---' : `Fio ${i + 1}`}
+                {isConnected ? '---' : `Wire ${i + 1}`}
               </button>
             );
           })}
@@ -82,7 +82,7 @@ export function ReconectarFiosTask({ onComplete }: TaskComponentProps) {
 
         {/* Right: Ports (shuffled order) */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ fontSize: 12, color: '#6b6b8a', marginBottom: 4, fontWeight: 600 }}>PORTAS</div>
+          <div style={{ fontSize: 12, color: '#6b6b8a', marginBottom: 4, fontWeight: 600 }}>PORTS</div>
           {portOrder.map(portIdx => {
             const connectedBy = connections.findIndex(c => c === portIdx);
             const hasConnection = connectedBy >= 0;
@@ -99,7 +99,7 @@ export function ReconectarFiosTask({ onComplete }: TaskComponentProps) {
                   color: WIRE_COLORS[portIdx],
                 }}
               >
-                {hasConnection ? `F${connectedBy + 1}` : `Porta`}
+                {hasConnection ? `W${connectedBy + 1}` : `Port`}
               </button>
             );
           })}
@@ -108,9 +108,9 @@ export function ReconectarFiosTask({ onComplete }: TaskComponentProps) {
 
       {/* Connection lines would go here with SVG overlay - simplified for now */}
       <div style={{ marginTop: 24, fontSize: 14, fontWeight: 600, color: completed ? '#4ade80' : '#6b6b8a' }}>
-        {completed ? 'Todos os fios reconectados!'
-          : selectedWire !== null ? `Fio ${selectedWire + 1} selecionado — clique na porta correspondente`
-          : `${connections.filter(c => c !== null).length}/${WIRE_COUNT} conectados`
+        {completed ? 'All wires reconnected!'
+          : selectedWire !== null ? `Wire ${selectedWire + 1} selected — click the matching port`
+          : `${connections.filter(c => c !== null).length}/${WIRE_COUNT} connected`
         }
       </div>
     </div>

@@ -42,14 +42,14 @@ export function AnalisarDadosTask({ onComplete }: TaskComponentProps) {
 
   return (
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
-      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Analisar Dados</div>
+      <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>Analyze Data</div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 24 }}>
-        Clique nas barras em ordem crescente (menor para maior)
+        Click the bars in ascending order (smallest to largest)
       </div>
 
       {error && (
         <div style={{ fontSize: 14, color: '#ef4444', fontWeight: 600, marginBottom: 12 }}>
-          Ordem incorreta! Tente novamente
+          Wrong order! Try again
         </div>
       )}
 
@@ -97,7 +97,7 @@ export function AnalisarDadosTask({ onComplete }: TaskComponentProps) {
       </div>
 
       <div style={{ fontSize: 14, fontWeight: 600, color: completed ? '#4ade80' : '#6b6b8a' }}>
-        {completed ? 'Dados analisados corretamente!' : `${clicks.length}/${BAR_COUNT} selecionados`}
+        {completed ? 'Data analyzed correctly!' : `${clicks.length}/${BAR_COUNT} selected`}
       </div>
     </div>
   );

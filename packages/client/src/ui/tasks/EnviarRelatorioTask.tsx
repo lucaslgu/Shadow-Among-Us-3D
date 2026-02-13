@@ -4,12 +4,12 @@ import type { TaskComponentProps } from '../TaskOverlay.js';
 export function EnviarRelatorioTask({ onComplete, onCancel }: TaskComponentProps) {
   return (
     <SequenceTaskBase
-      title="Enviar Relatório"
-      subtitle="Transmita o relatório de status"
+      title="Send Report"
+      subtitle="Transmit the status report"
       steps={[
-        { label: 'Selecionar arquivo', icon: '📄', buttonText: 'Selecionar' },
-        { label: 'Confirmar envio', icon: '📡', buttonText: 'Confirmar Envio' },
-        { label: 'Transmitindo...', icon: '⏳', buttonText: 'Aguardando...' },
+        { label: 'Select file', icon: '📄', buttonText: 'Select' },
+        { label: 'Confirm send', icon: '📡', buttonText: 'Confirm Send' },
+        { label: 'Transmitting...', icon: '⏳', buttonText: 'Waiting...' },
       ]}
       autoCompleteLastStep={2000}
       onComplete={onComplete}

@@ -68,10 +68,10 @@ export function ScannerTask({ onComplete, onCancel }: TaskComponentProps) {
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
       {/* Title */}
       <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-        Scanner de Bioidentifica&ccedil;&atilde;o
+        Bio-Identification Scanner
       </div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 32 }}>
-        Segure o bot&atilde;o para escanear
+        Hold the button to scan
       </div>
 
       {/* Scanner visual area */}
@@ -187,10 +187,10 @@ export function ScannerTask({ onComplete, onCancel }: TaskComponentProps) {
         }}
       >
         {completed
-          ? 'Escaneamento Completo!'
+          ? 'Scan Complete!'
           : scanning
-            ? 'Escaneando...'
-            : 'Segure para Escanear'}
+            ? 'Scanning...'
+            : 'Hold to Scan'}
       </button>
     </div>
   );

@@ -143,10 +143,10 @@ export function TimingTaskBase({
 
       <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginBottom: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: '#44aaff' }}>
-          Acertos: {hits}/{requiredHits}
+          Hits: {hits}/{requiredHits}
         </div>
-        {lastResult === 'hit' && <span style={{ color: '#4ade80', fontWeight: 700 }}>Acertou!</span>}
-        {lastResult === 'miss' && <span style={{ color: '#ef4444', fontWeight: 700 }}>Errou! Reset</span>}
+        {lastResult === 'hit' && <span style={{ color: '#4ade80', fontWeight: 700 }}>Hit!</span>}
+        {lastResult === 'miss' && <span style={{ color: '#ef4444', fontWeight: 700 }}>Miss! Reset</span>}
       </div>
 
       <canvas
@@ -161,11 +161,11 @@ export function TimingTaskBase({
       />
 
       {completed && (
-        <div style={{ fontSize: 18, fontWeight: 700, color: '#4ade80' }}>Calibração perfeita!</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: '#4ade80' }}>Perfect calibration!</div>
       )}
       {!completed && (
         <div style={{ fontSize: 13, color: '#6b6b8a' }}>
-          Clique quando a agulha estiver na zona verde
+          Click when the needle is in the green zone
         </div>
       )}
     </div>

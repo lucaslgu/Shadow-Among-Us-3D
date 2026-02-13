@@ -80,6 +80,9 @@ interface GameState {
   // Teleport map overlay
   teleportMapOpen: boolean;
 
+  // Hacker panel overlay
+  hackerPanelOpen: boolean;
+
   // Loading screen
   loadedPlayerIds: string[];
   loadingTotalPlayers: number;
@@ -94,6 +97,30 @@ interface GameState {
   showDeathScreen: boolean;
   ghostPossessTarget: string | null;
   ghostPossessCooldownEnd: number;
+
+  // Meeting / voting
+  nearestBodyId: string | null;
+  nearEmergencyButton: boolean;
+  meetingPhase: 'discussion' | 'voting' | 'result' | null;
+  meetingReporterId: string | null;
+  meetingBodyId: string | null;
+  meetingTimer: number; // seconds remaining
+  voteResult: { ejectedId: string | null; votes: Record<string, string | null> } | null;
+  hasVoted: boolean;
+
+  // Bodies from snapshot
+  bodies: Array<{ bodyId: string; victimId: string; victimColor: string; position: [number, number, number] }>;
+
+  // Shadow fake task guide
+  selectedGuideTaskId: string | null;
+
+  // Game end result
+  gameEndResult: {
+    winner: 'crew' | 'shadow';
+    reason: string;
+    roles: Record<string, { name: string; color: string; role: string }>;
+    stats: { tasksCompleted: number; totalTasks: number; gameDurationSec: number };
+  } | null;
 
   // Actions
   setPhase: (phase: GamePhase) => void;
@@ -114,11 +141,27 @@ interface GameState {
   exitTargetingMode: () => void;
   openTeleportMap: () => void;
   closeTeleportMap: () => void;
+  openHackerPanel: () => void;
+  closeHackerPanel: () => void;
   setLoadingProgress: (loadedPlayerIds: string[], totalPlayers: number) => void;
   setGhostState: (isGhost: boolean, deathCause: string | null) => void;
   dismissDeathScreen: () => void;
   setGhostPossessTarget: (targetId: string | null) => void;
   setGhostPossessCooldownEnd: (time: number) => void;
+  setNearestBodyId: (bodyId: string | null) => void;
+  setNearEmergencyButton: (near: boolean) => void;
+  setMeetingPhase: (phase: 'discussion' | 'voting' | 'result' | null) => void;
+  setMeetingStarted: (reporterId: string, bodyId: string | null) => void;
+  setMeetingTimer: (seconds: number) => void;
+  setVoteResult: (result: GameState['voteResult']) => void;
+  setHasVoted: (voted: boolean) => void;
+  setSelectedGuideTaskId: (taskId: string | null) => void;
+  setGameEndResult: (
+    winner: 'crew' | 'shadow',
+    reason: string,
+    roles: Record<string, { name: string; color: string; role: string }>,
+    stats: { tasksCompleted: number; totalTasks: number; gameDurationSec: number },
+  ) => void;
   reset: () => void;
 }
 
@@ -149,6 +192,7 @@ const initialState = {
   targetingMode: false,
   nearbyTargets: [] as NearbyTarget[],
   teleportMapOpen: false,
+  hackerPanelOpen: false,
   loadedPlayerIds: [] as string[],
   loadingTotalPlayers: 0,
   shipOxygen: 100,
@@ -158,6 +202,17 @@ const initialState = {
   showDeathScreen: false,
   ghostPossessTarget: null as string | null,
   ghostPossessCooldownEnd: 0,
+  nearestBodyId: null as string | null,
+  nearEmergencyButton: false,
+  meetingPhase: null as GameState['meetingPhase'],
+  meetingReporterId: null as string | null,
+  meetingBodyId: null as string | null,
+  meetingTimer: 0,
+  voteResult: null as GameState['voteResult'],
+  hasVoted: false,
+  bodies: [] as GameState['bodies'],
+  selectedGuideTaskId: null as string | null,
+  gameEndResult: null as GameState['gameEndResult'],
 };
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -202,6 +257,9 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
     if (snapshot.oxygenRefillPlayerId !== undefined) {
       (mazeUpdate as any).oxygenRefillPlayerId = snapshot.oxygenRefillPlayerId;
+    }
+    if ((snapshot as any).bodies) {
+      (mazeUpdate as any).bodies = (snapshot as any).bodies;
     }
 
     if (!localId) {
@@ -325,6 +383,14 @@ export const useGameStore = create<GameState>((set, get) => ({
   closeTeleportMap: () =>
     set({ teleportMapOpen: false }),
 
+  openHackerPanel: () => {
+    document.exitPointerLock();
+    set({ hackerPanelOpen: true });
+  },
+
+  closeHackerPanel: () =>
+    set({ hackerPanelOpen: false }),
+
   setLoadingProgress: (loadedPlayerIds, totalPlayers) =>
     set({ loadedPlayerIds, loadingTotalPlayers: totalPlayers }),
 
@@ -340,5 +406,25 @@ export const useGameStore = create<GameState>((set, get) => ({
   setGhostPossessCooldownEnd: (time) =>
     set({ ghostPossessCooldownEnd: time }),
 
-  reset: () => set({ ...initialState, chatMessages: [], mazeLayout: null, mazeSnapshot: null, currentEra: null, cosmicScenario: null, eraGravity: null, eraDescription: null, activeTaskId: null, activeTaskType: null, taskOverlayVisible: false, assignedTasks: [], nearestInteractTask: null, targetingMode: false, nearbyTargets: [], loadedPlayerIds: [], loadingTotalPlayers: 0 }),
+  setNearestBodyId: (bodyId) => set({ nearestBodyId: bodyId }),
+
+  setNearEmergencyButton: (near) => set({ nearEmergencyButton: near }),
+
+  setMeetingPhase: (phase) => set({ meetingPhase: phase }),
+
+  setMeetingStarted: (reporterId, bodyId) =>
+    set({ meetingReporterId: reporterId, meetingBodyId: bodyId, meetingPhase: 'discussion', hasVoted: false, voteResult: null }),
+
+  setMeetingTimer: (seconds) => set({ meetingTimer: seconds }),
+
+  setVoteResult: (result) => set({ voteResult: result, meetingPhase: 'result' }),
+
+  setHasVoted: (voted) => set({ hasVoted: voted }),
+
+  setSelectedGuideTaskId: (taskId) => set({ selectedGuideTaskId: taskId }),
+
+  setGameEndResult: (winner, reason, roles, stats) =>
+    set({ gameEndResult: { winner, reason, roles, stats } }),
+
+  reset: () => set({ ...initialState, chatMessages: [], mazeLayout: null, mazeSnapshot: null, currentEra: null, cosmicScenario: null, eraGravity: null, eraDescription: null, activeTaskId: null, activeTaskType: null, taskOverlayVisible: false, assignedTasks: [], nearestInteractTask: null, targetingMode: false, nearbyTargets: [], loadedPlayerIds: [], loadingTotalPlayers: 0, gameEndResult: null, nearestBodyId: null, nearEmergencyButton: false, meetingPhase: null, meetingReporterId: null, meetingBodyId: null, meetingTimer: 0, voteResult: null, hasVoted: false, bodies: [], selectedGuideTaskId: null }),
 }));

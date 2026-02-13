@@ -25,6 +25,7 @@ export function Lobby() {
   const startGame = useNetworkStore((st) => st.startGame);
   const roomError = useNetworkStore((st) => st.roomError);
   const socket = useNetworkStore((st) => st.socket);
+  const waitingForGame = useNetworkStore((st) => st.waitingForGame);
   const phase = useGameStore((st) => st.phase);
 
   // Game started — redirect to game route immediately
@@ -80,6 +81,27 @@ export function Lobby() {
       <div style={{ ...s.card, width: 480, marginRight: 300 }}>
         <div style={s.title}>Lobby</div>
         <div style={s.subtitle}>Room: {roomCode ?? '...'}</div>
+
+        {/* Waiting for game banner */}
+        {waitingForGame && (
+          <div
+            style={{
+              background: 'rgba(251, 191, 36, 0.12)',
+              border: `1px solid ${s.colors.warning}`,
+              borderRadius: 8,
+              padding: '12px 16px',
+              marginBottom: 16,
+              textAlign: 'center',
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 700, color: s.colors.warning }}>
+              Game in progress...
+            </div>
+            <div style={{ fontSize: 12, color: s.colors.textMuted, marginTop: 4 }}>
+              Waiting for the current match to end for a new round.
+            </div>
+          </div>
+        )}
 
         {/* Player List */}
         <div
@@ -282,16 +304,19 @@ export function Lobby() {
         <button
           style={{
             ...s.button,
-            background: myReady ? s.colors.success : s.colors.primary,
+            background: waitingForGame ? s.colors.surfaceHover : myReady ? s.colors.success : s.colors.primary,
+            color: waitingForGame ? s.colors.textMuted : undefined,
+            cursor: waitingForGame ? 'not-allowed' : 'pointer',
             marginBottom: 8,
           }}
-          onClick={toggleReady}
+          onClick={() => !waitingForGame && toggleReady()}
+          disabled={waitingForGame}
         >
-          {myReady ? 'Ready!' : 'Click to Ready Up'}
+          {waitingForGame ? 'Waiting for match to end...' : myReady ? 'Ready!' : 'Click to Ready Up'}
         </button>
 
         {/* Start Game (host only) */}
-        {isHost && (
+        {isHost && !waitingForGame && (
           <button
             style={{
               ...s.button,

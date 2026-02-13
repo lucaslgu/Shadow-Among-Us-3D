@@ -55,10 +55,10 @@ export function EnergyPanelTask({ onComplete, onCancel }: TaskComponentProps) {
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
       {/* Title */}
       <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-        Painel de Energia
+        Energy Panel
       </div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 32 }}>
-        Alinhe os interruptores com o padr&atilde;o
+        Align the switches with the pattern
       </div>
 
       {/* Target pattern */}
@@ -73,7 +73,7 @@ export function EnergyPanelTask({ onComplete, onCancel }: TaskComponentProps) {
             fontWeight: 600,
           }}
         >
-          Padr&atilde;o Alvo
+          Target Pattern
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
           {target.map((on, i) => (
@@ -127,7 +127,7 @@ export function EnergyPanelTask({ onComplete, onCancel }: TaskComponentProps) {
             fontWeight: 600,
           }}
         >
-          Seus Interruptores
+          Your Switches
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
           {switches.map((on, i) => {
@@ -192,8 +192,8 @@ export function EnergyPanelTask({ onComplete, onCancel }: TaskComponentProps) {
         }}
       >
         {completed
-          ? 'Painel alinhado com sucesso!'
-          : 'Clique nos interruptores para alternar'}
+          ? 'Panel aligned successfully!'
+          : 'Click the switches to toggle'}
       </div>
     </div>
   );

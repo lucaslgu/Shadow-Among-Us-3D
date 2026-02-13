@@ -17,6 +17,11 @@ import { TaskInteraction } from '../maze/TaskInteraction.js';
 import { OxygenInteraction } from '../maze/OxygenInteraction.js';
 import { TaskGuide } from '../maze/TaskGuide.js';
 import { MindControlPiP } from '../ui/MindControlPiP.js';
+import { PipeSystem } from '../maze/PipeSystem.js';
+import { MeetingTable } from '../entities/MeetingTable.js';
+import { EmergencyButtonInteraction } from '../entities/EmergencyButtonInteraction.js';
+import { DeadBodies } from '../entities/DeadBodies.js';
+import { BodyInteraction } from '../entities/BodyInteraction.js';
 import { getFloorTextures, getBeamTextures } from '../textures/spaceship-textures.js';
 import { MAP_HALF_EXTENT } from '@shadow/shared';
 
@@ -272,6 +277,21 @@ function PlayingScene() {
       {/* Mind Control PiP viewport */}
       <MindControlPiP />
 
+      {/* Central meeting table */}
+      <MeetingTable />
+
+      {/* Emergency button interaction */}
+      <EmergencyButtonInteraction />
+
+      {/* Dead bodies on the ground */}
+      <DeadBodies />
+
+      {/* Body report interaction */}
+      <BodyInteraction />
+
+      {/* Underground pipe system */}
+      <PipeSystem />
+
       {/* Third-person camera */}
       <ThirdPersonCamera />
 
@@ -313,8 +333,8 @@ function SceneLoadedNotifier() {
 
 function SceneContent() {
   const phase = useGameStore((st) => st.phase);
-  // Render PlayingScene during both 'loading' (to start building 3D assets) and 'playing'
-  if (phase === 'loading' || phase === 'playing') {
+  // Render PlayingScene during loading, playing, meeting, and results phases
+  if (phase === 'loading' || phase === 'playing' || phase === 'meeting' || phase === 'results') {
     return (
       <>
         <PlayingScene />
@@ -393,10 +413,10 @@ export function GameScene() {
             }}
           >
             <div style={{ fontSize: 24, fontWeight: 700, color: '#e2e2f0', marginBottom: 8 }}>
-              Clique para jogar
+              Click to play
             </div>
             <div style={{ fontSize: 13, color: '#6b6b8a' }}>
-              W/A/S/D mover | Mouse olhar | F lanterna | E interagir
+              W/A/S/D move | Mouse look | F flashlight | E interact
             </div>
           </div>
         </div>

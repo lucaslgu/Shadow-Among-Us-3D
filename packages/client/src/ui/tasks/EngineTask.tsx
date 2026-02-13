@@ -38,7 +38,7 @@ export function EngineTask({ onComplete, onCancel }: TaskComponentProps) {
         setLevel(0);
         setFilling(false);
         setStatus('fail');
-        setFailMessage('Excedeu! Tente novamente.');
+        setFailMessage('Exceeded! Try again.');
         setTimeout(resetGauge, 1000);
         return;
       }
@@ -78,7 +78,7 @@ export function EngineTask({ onComplete, onCancel }: TaskComponentProps) {
     } else if (currentLevel < TARGET_MIN && currentLevel > 0) {
       // Released too early
       setStatus('fail');
-      setFailMessage('Insuficiente! Segure at\u00e9 a zona verde.');
+      setFailMessage('Insufficient! Hold until the green zone.');
       setTimeout(resetGauge, 1000);
     }
   }, [onComplete, resetGauge]);
@@ -99,10 +99,10 @@ export function EngineTask({ onComplete, onCancel }: TaskComponentProps) {
     <div style={{ textAlign: 'center', userSelect: 'none' }}>
       {/* Title */}
       <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-        Motores
+        Engines
       </div>
       <div style={{ fontSize: 14, color: '#6b6b8a', marginBottom: 24 }}>
-        Segure para abastecer (zona: 70-100%)
+        Hold to refuel (zone: 70-100%)
       </div>
 
       <div
@@ -257,12 +257,12 @@ export function EngineTask({ onComplete, onCancel }: TaskComponentProps) {
             }}
           >
             {completed
-              ? 'Abastecido!'
+              ? 'Refueled!'
               : filling
                 ? isInZone
-                  ? 'Solte agora!'
-                  : 'Enchendo...'
-                : 'Segure para\nencher'}
+                  ? 'Release now!'
+                  : 'Filling...'
+                : 'Hold to\nfill'}
           </button>
 
           {/* Status message */}
@@ -283,13 +283,13 @@ export function EngineTask({ onComplete, onCancel }: TaskComponentProps) {
             }}
           >
             {status === 'success'
-              ? 'Motor abastecido!'
+              ? 'Engine refueled!'
               : status === 'fail'
                 ? failMessage
                 : isInZone
-                  ? 'Na zona! Solte!'
+                  ? 'In zone! Release!'
                   : filling
-                    ? 'Enchendo...'
+                    ? 'Filling...'
                     : ''}
           </div>
 
@@ -297,11 +297,11 @@ export function EngineTask({ onComplete, onCancel }: TaskComponentProps) {
           <div style={{ fontSize: 11, color: '#3a3a55' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
               <div style={{ width: 8, height: 8, background: '#4ade80', borderRadius: 2 }} />
-              <span>Zona alvo (70-100%)</span>
+              <span>Target zone (70-100%)</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 8, height: 8, background: '#ef4444', borderRadius: 2 }} />
-              <span>Excedeu (&gt;100%)</span>
+              <span>Exceeded (&gt;100%)</span>
             </div>
           </div>
         </div>

@@ -47,7 +47,7 @@ export function MatchTaskBase({
         <div style={{
           fontSize: 12, color: '#6b6b8a', marginBottom: 8,
           textTransform: 'uppercase', letterSpacing: 1, fontWeight: 600,
-        }}>Alvo</div>
+        }}>Target</div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
           {target.map((val, i) => (
             <div key={`t-${i}`} style={{
@@ -70,7 +70,7 @@ export function MatchTaskBase({
         <div style={{
           fontSize: 12, color: '#6b6b8a', marginBottom: 8,
           textTransform: 'uppercase', letterSpacing: 1, fontWeight: 600,
-        }}>Seus valores</div>
+        }}>Your values</div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: 16 }}>
           {current.map((val, i) => {
             const matches = val === target[i];
@@ -108,7 +108,7 @@ export function MatchTaskBase({
         marginTop: 24, fontSize: 14, fontWeight: 600,
         color: completed ? '#4ade80' : '#6b6b8a',
       }}>
-        {completed ? 'Valores alinhados com sucesso!' : 'Ajuste os valores para coincidir com o alvo'}
+        {completed ? 'Values aligned successfully!' : 'Adjust the values to match the target'}
       </div>
     </div>
   );

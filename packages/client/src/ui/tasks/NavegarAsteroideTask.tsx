@@ -4,8 +4,8 @@ import type { TaskComponentProps } from '../TaskOverlay.js';
 export function NavegarAsteroideTask({ onComplete, onCancel }: TaskComponentProps) {
   return (
     <ClickTargetTaskBase
-      title="Navegar Campo de Asteroides"
-      subtitle="Destrua os asteroides azuis — evite os vermelhos!"
+      title="Navigate Asteroid Field"
+      subtitle="Destroy blue asteroids — avoid the red ones!"
       targetCount={8}
       viewportW={520}
       viewportH={340}

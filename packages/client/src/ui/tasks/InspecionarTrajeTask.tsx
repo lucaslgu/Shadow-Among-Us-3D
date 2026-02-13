@@ -4,8 +4,8 @@ import type { TaskComponentProps } from '../TaskOverlay.js';
 export function InspecionarTrajeTask({ onComplete, onCancel }: TaskComponentProps) {
   return (
     <ClickTargetTaskBase
-      title="Inspecionar Traje"
-      subtitle="Encontre e clique nos 3 pontos de dano"
+      title="Inspect Suit"
+      subtitle="Find and click the 3 damage points"
       targetCount={3}
       viewportW={420}
       viewportH={320}
