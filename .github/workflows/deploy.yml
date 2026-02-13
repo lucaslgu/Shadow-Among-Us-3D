@@ -10,23 +10,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Node.js 20
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      # 3. pnpm
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      # 4. Cache pnpm
       - name: Get pnpm store directory
         shell: bash
         run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
@@ -39,15 +35,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
-      # 5. Install
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # 6. Build client (gera packages/client/dist/)
       - name: Build client
         run: pnpm --filter client build
 
-      # 7. Setup SSH
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
@@ -55,14 +48,12 @@ jobs:
           chmod 600 ~/.ssh/ec2_key
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      # 8. Ensure rsync on EC2
       - name: Install rsync on EC2
         run: |
           ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
             "sudo dnf install -y rsync"
 
-      # 9. Deploy via rsync
       - name: Deploy to EC2
         run: |
           rsync -avz --delete \
@@ -78,7 +69,94 @@ jobs:
             -e "ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no" \
             ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/ec2-user/app/
 
-      # 9. Install deps + restart PM2 no EC2
+      - name: Upload SSL certificates
+        run: |
+          echo "$SSL_CERT" > /tmp/origin.pem
+          echo "$SSL_KEY" > /tmp/origin.key
+          SSH_CMD="ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no"
+          SCP_CMD="scp -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no"
+          $SCP_CMD /tmp/origin.pem ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/origin.pem
+          $SCP_CMD /tmp/origin.key ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/origin.key
+          $SSH_CMD ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "sudo mkdir -p /etc/nginx/ssl && sudo mv /tmp/origin.pem /etc/nginx/ssl/origin.pem && sudo mv /tmp/origin.key /etc/nginx/ssl/origin.key && sudo chmod 600 /etc/nginx/ssl/origin.key"
+          rm -f /tmp/origin.pem /tmp/origin.key
+        env:
+          SSL_CERT: ${{ secrets.EC2_SSL_CERT }}
+          SSL_KEY: ${{ secrets.EC2_SSL_KEY }}
+
+      - name: Configure nginx with SSL
+        run: |
+          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'ENDSSH'
+            set -e
+
+            # Write a clean nginx.conf (remove default server block)
+            sudo tee /etc/nginx/nginx.conf > /dev/null << 'MAINCONF'
+          user nginx;
+          worker_processes auto;
+          error_log /var/log/nginx/error.log notice;
+          pid /run/nginx.pid;
+
+          include /usr/share/nginx/modules/*.conf;
+
+          events {
+              worker_connections 1024;
+          }
+
+          http {
+              log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                              '$status $body_bytes_sent "$http_referer" '
+                              '"$http_user_agent" "$http_x_forwarded_for"';
+              access_log /var/log/nginx/access.log main;
+              sendfile on;
+              tcp_nopush on;
+              keepalive_timeout 65;
+              types_hash_max_size 4096;
+              include /etc/nginx/mime.types;
+              default_type application/octet-stream;
+              include /etc/nginx/conf.d/*.conf;
+          }
+          MAINCONF
+
+            # Write site config with SSL
+            sudo tee /etc/nginx/conf.d/shadow-among-us.conf > /dev/null << 'SITECONF'
+          server {
+              listen 80;
+              server_name _;
+              return 301 https://$host$request_uri;
+          }
+
+          server {
+              listen 443 ssl;
+              server_name _;
+
+              ssl_certificate /etc/nginx/ssl/origin.pem;
+              ssl_certificate_key /etc/nginx/ssl/origin.key;
+
+              location / {
+                  proxy_pass http://127.0.0.1:3001;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_read_timeout 86400;
+              }
+          }
+          SITECONF
+
+            # Remove any other default configs
+            sudo rm -f /etc/nginx/conf.d/default.conf
+
+            # Test and restart nginx
+            sudo nginx -t
+            sudo systemctl restart nginx
+            sudo systemctl enable nginx
+
+            echo "Nginx configured with SSL and restarted successfully"
+          ENDSSH
+
       - name: Restart application
         run: |
           ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no \
@@ -87,18 +165,18 @@ jobs:
 
             cd /home/ec2-user/app
 
-            # Copiar .env (criado pelo user-data do Terraform)
+            # Copy .env
             if [ -f /home/ec2-user/app/.env ]; then
               cp /home/ec2-user/app/.env packages/server/.env 2>/dev/null || true
             fi
 
-            # Instalar dependencias
+            # Install dependencies
             pnpm install --frozen-lockfile
 
-            # Parar processo antigo
+            # Stop old process
             pm2 delete shadow-among-us 2>/dev/null || true
 
-            # Iniciar servidor com tsx (tsconfig tem noEmit)
+            # Start server with tsx
             cd packages/server
             pm2 start "npx tsx src/index.ts" \
               --name shadow-among-us \
@@ -109,36 +187,8 @@ jobs:
             echo "Deploy concluido! App rodando na porta 3001"
           ENDSSH
 
-      # 11. Diagnostics
-      - name: Diagnose EC2 services
-        run: |
-          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'ENDSSH'
-            echo "=== NGINX STATUS ==="
-            sudo systemctl status nginx --no-pager 2>&1 || true
-            echo ""
-            echo "=== NGINX CONFIG ==="
-            sudo cat /etc/nginx/conf.d/shadow-among-us.conf 2>/dev/null || echo "NO CONFIG FILE"
-            echo ""
-            echo "=== LISTENING PORTS ==="
-            sudo ss -tlnp | grep -E ':80|:3001|:443' || echo "No matches"
-            echo ""
-            echo "=== PM2 LIST ==="
-            pm2 list
-            echo ""
-            echo "=== PM2 LOGS (last 30 lines) ==="
-            pm2 logs shadow-among-us --lines 30 --nostream 2>/dev/null || true
-            echo ""
-            echo "=== CURL LOCALHOST:3001 ==="
-            curl -s --max-time 5 http://127.0.0.1:3001/health || echo "FAILED"
-            echo ""
-            echo "=== CURL LOCALHOST:80 ==="
-            curl -s --max-time 5 http://127.0.0.1:80/health || echo "FAILED"
-          ENDSSH
-
-      # 12. Health check
       - name: Health check
         run: |
           echo "Aguardando servidor iniciar..."
-          sleep 10
-          curl -f --max-time 15 http://${{ secrets.EC2_HOST }}/health || echo "Health check falhou (servidor pode estar iniciando)"
+          sleep 15
+          curl -f --max-time 15 http://${{ secrets.EC2_HOST }}:3001/health || echo "Health check falhou (servidor pode estar iniciando)"
