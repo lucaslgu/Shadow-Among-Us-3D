@@ -111,12 +111,15 @@ interface GameState {
   // Bodies from snapshot
   bodies: Array<{ bodyId: string; victimId: string; victimColor: string; position: [number, number, number] }>;
 
+  // Kill target (shadow only)
+  nearestKillTargetId: string | null;
+
   // Shadow fake task guide
   selectedGuideTaskId: string | null;
 
   // Game end result
   gameEndResult: {
-    winner: 'crew' | 'shadow';
+    winner: 'crew' | 'shadow' | 'draw';
     reason: string;
     roles: Record<string, { name: string; color: string; role: string }>;
     stats: { tasksCompleted: number; totalTasks: number; gameDurationSec: number };
@@ -155,9 +158,10 @@ interface GameState {
   setMeetingTimer: (seconds: number) => void;
   setVoteResult: (result: GameState['voteResult']) => void;
   setHasVoted: (voted: boolean) => void;
+  setNearestKillTargetId: (targetId: string | null) => void;
   setSelectedGuideTaskId: (taskId: string | null) => void;
   setGameEndResult: (
-    winner: 'crew' | 'shadow',
+    winner: 'crew' | 'shadow' | 'draw',
     reason: string,
     roles: Record<string, { name: string; color: string; role: string }>,
     stats: { tasksCompleted: number; totalTasks: number; gameDurationSec: number },
@@ -211,6 +215,7 @@ const initialState = {
   voteResult: null as GameState['voteResult'],
   hasVoted: false,
   bodies: [] as GameState['bodies'],
+  nearestKillTargetId: null as string | null,
   selectedGuideTaskId: null as string | null,
   gameEndResult: null as GameState['gameEndResult'],
 };
@@ -293,14 +298,17 @@ export const useGameStore = create<GameState>((set, get) => ({
     const mazeLayout = state.mazeLayout;
     const mazeState = snapshot.maze;
     const skipCollision = mySnapshot.isImpermeable || mySnapshot.isGhost;
+    const isUnderground = mySnapshot.isUnderground;
     const collisionCtx: CollisionContext | undefined =
       !skipCollision && mazeLayout && mazeState
-        ? {
-            walls: mazeLayout.walls,
-            doorStates: mazeState.doorStates,
-            dynamicWallStates: mazeState.dynamicWallStates,
-            muralhaWalls: mazeState.muralhaWalls,
-          }
+        ? isUnderground
+          ? { walls: [], doorStates: {}, dynamicWallStates: {}, pipeWalls: mazeLayout.pipeWalls }
+          : {
+              walls: mazeLayout.walls,
+              doorStates: mazeState.doorStates,
+              dynamicWallStates: mazeState.dynamicWallStates,
+              muralhaWalls: mazeState.muralhaWalls,
+            }
         : undefined;
 
     // Start from server position, replay unacknowledged inputs
@@ -421,10 +429,12 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   setHasVoted: (voted) => set({ hasVoted: voted }),
 
+  setNearestKillTargetId: (targetId) => set({ nearestKillTargetId: targetId }),
+
   setSelectedGuideTaskId: (taskId) => set({ selectedGuideTaskId: taskId }),
 
   setGameEndResult: (winner, reason, roles, stats) =>
     set({ gameEndResult: { winner, reason, roles, stats } }),
 
-  reset: () => set({ ...initialState, chatMessages: [], mazeLayout: null, mazeSnapshot: null, currentEra: null, cosmicScenario: null, eraGravity: null, eraDescription: null, activeTaskId: null, activeTaskType: null, taskOverlayVisible: false, assignedTasks: [], nearestInteractTask: null, targetingMode: false, nearbyTargets: [], loadedPlayerIds: [], loadingTotalPlayers: 0, gameEndResult: null, nearestBodyId: null, nearEmergencyButton: false, meetingPhase: null, meetingReporterId: null, meetingBodyId: null, meetingTimer: 0, voteResult: null, hasVoted: false, bodies: [], selectedGuideTaskId: null }),
+  reset: () => set({ ...initialState, chatMessages: [], mazeLayout: null, mazeSnapshot: null, currentEra: null, cosmicScenario: null, eraGravity: null, eraDescription: null, activeTaskId: null, activeTaskType: null, taskOverlayVisible: false, assignedTasks: [], nearestInteractTask: null, targetingMode: false, nearbyTargets: [], loadedPlayerIds: [], loadingTotalPlayers: 0, gameEndResult: null, nearestBodyId: null, nearEmergencyButton: false, meetingPhase: null, meetingReporterId: null, meetingBodyId: null, meetingTimer: 0, voteResult: null, hasVoted: false, bodies: [], selectedGuideTaskId: null, nearestKillTargetId: null }),
 }));

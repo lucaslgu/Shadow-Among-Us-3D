@@ -22,6 +22,7 @@ import { MeetingTable } from '../entities/MeetingTable.js';
 import { EmergencyButtonInteraction } from '../entities/EmergencyButtonInteraction.js';
 import { DeadBodies } from '../entities/DeadBodies.js';
 import { BodyInteraction } from '../entities/BodyInteraction.js';
+import { KillInteraction } from '../entities/KillInteraction.js';
 import { getFloorTextures, getBeamTextures } from '../textures/spaceship-textures.js';
 import { MAP_HALF_EXTENT } from '@shadow/shared';
 
@@ -288,6 +289,9 @@ function PlayingScene() {
 
       {/* Body report interaction */}
       <BodyInteraction />
+
+      {/* Kill interaction (shadow proximity check + Space key) */}
+      <KillInteraction />
 
       {/* Underground pipe system */}
       <PipeSystem />

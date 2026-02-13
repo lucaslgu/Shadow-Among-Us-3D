@@ -81,8 +81,11 @@ function GameNetworkBridge() {
           const { mazeLayout, mazeSnapshot, localPlayerId, players } = gameStore;
           const mySnap = localPlayerId ? players[localPlayerId] : null;
           const skipCollision = mySnap?.isImpermeable || gameStore.isGhost;
+          const isUnderground = mySnap?.isUnderground;
           const collisionCtx = !skipCollision && mazeLayout && mazeSnapshot
-            ? { walls: mazeLayout.walls, doorStates: mazeSnapshot.doorStates, dynamicWallStates: mazeSnapshot.dynamicWallStates, muralhaWalls: mazeSnapshot.muralhaWalls }
+            ? isUnderground
+              ? { walls: [] as any[], doorStates: {}, dynamicWallStates: {}, pipeWalls: mazeLayout.pipeWalls }
+              : { walls: mazeLayout.walls, doorStates: mazeSnapshot.doorStates, dynamicWallStates: mazeSnapshot.dynamicWallStates, muralhaWalls: mazeSnapshot.muralhaWalls }
             : undefined;
           const basePos = applyMovement(gameStore.localPosition, input, 1 / 20, undefined, collisionCtx);
           const newRot = yawToQuaternion(input.mouseX);

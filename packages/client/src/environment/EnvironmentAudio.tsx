@@ -152,7 +152,7 @@ export function EnvironmentAudio({ activeEra, simRef }: EnvironmentAudioProps) {
   useEffect(() => {
     const ctx = new AudioContext();
     const masterGain = ctx.createGain();
-    masterGain.gain.value = 0.12; // Ambient level
+    masterGain.gain.value = 0.35; // Ambient level
     masterGain.connect(ctx.destination);
 
     const noiseBuffer = createWhiteNoiseBuffer(ctx, 4);
@@ -280,7 +280,7 @@ export function EnvironmentAudio({ activeEra, simRef }: EnvironmentAudioProps) {
 
     // Sync ambient volume from audio store
     const { masterVolume, ambientVolume } = useAudioStore.getState();
-    nodes.masterGain.gain.value = 0.12 * masterVolume * ambientVolume;
+    nodes.masterGain.gain.value = 0.35 * masterVolume * ambientVolume;
 
     // ── Sun voices — each sun's volume and pitch based on elevation + velocity ──
     for (let i = 0; i < 3; i++) {

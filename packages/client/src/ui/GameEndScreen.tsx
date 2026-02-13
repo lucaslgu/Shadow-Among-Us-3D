@@ -6,6 +6,7 @@ const REASON_TEXT: Record<string, string> = {
   all_tasks_done: 'All tasks were completed!',
   shadow_eliminated: 'All shadows were eliminated!',
   all_left: 'All players left the match.',
+  all_dead: 'Everyone perished!',
 };
 
 export function GameEndScreen() {
@@ -14,9 +15,10 @@ export function GameEndScreen() {
 
   if (phase !== 'results' || !result) return null;
 
+  const isDraw = result.winner === 'draw';
   const isShadowWin = result.winner === 'shadow';
-  const mainColor = isShadowWin ? s.colors.danger : s.colors.success;
-  const winnerText = isShadowWin ? 'SHADOWS WIN' : 'CREW WINS';
+  const mainColor = isDraw ? '#f59e0b' : isShadowWin ? s.colors.danger : s.colors.success;
+  const winnerText = isDraw ? 'DRAW' : isShadowWin ? 'SHADOWS WIN' : 'CREW WINS';
   const reasonText = REASON_TEXT[result.reason] ?? result.reason;
 
   const minutes = Math.floor(result.stats.gameDurationSec / 60);
@@ -52,18 +54,20 @@ export function GameEndScreen() {
         style={{
           position: 'absolute',
           inset: 0,
-          background: isShadowWin
+          background: isDraw
+            ? 'radial-gradient(ellipse at center, rgba(0,0,0,0.7) 0%, rgba(40,30,0,0.9) 100%)'
+            : isShadowWin
             ? 'radial-gradient(ellipse at center, rgba(0,0,0,0.7) 0%, rgba(40,0,0,0.9) 100%)'
             : 'radial-gradient(ellipse at center, rgba(0,0,0,0.7) 0%, rgba(0,30,10,0.9) 100%)',
         }}
       />
 
       {/* Content */}
-      <div style={{ position: 'relative', textAlign: 'center', zIndex: 1, maxWidth: 500 }}>
+      <div style={{ position: 'relative', textAlign: 'center', zIndex: 1, maxWidth: 500, padding: '0 16px', boxSizing: 'border-box' as const, width: '100%' }}>
         {/* Winner text */}
         <div
           style={{
-            fontSize: 48,
+            fontSize: 'clamp(30px, 7vw, 48px)',
             fontWeight: 900,
             color: mainColor,
             letterSpacing: 4,
@@ -77,9 +81,9 @@ export function GameEndScreen() {
         {/* Reason */}
         <div
           style={{
-            fontSize: 18,
+            fontSize: 'clamp(14px, 2.5vw, 18px)',
             color: 'rgba(255, 255, 255, 0.7)',
-            marginBottom: 32,
+            marginBottom: 'clamp(16px, 4vh, 32px)',
           }}
         >
           {reasonText}

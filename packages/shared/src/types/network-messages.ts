@@ -38,6 +38,7 @@ export interface LobbyPlayer {
   name: string;
   isHost: boolean;
   color: string;
+  ready: boolean;
 }
 
 // ===== Client -> Server Events (Socket.io expects function signatures) =====
@@ -87,7 +88,6 @@ export interface ClientEvents {
   // Pipe system events
   'pipe:enter': (data: { pipeNodeId: string }) => void;
   'pipe:exit': (data: { pipeNodeId: string }) => void;
-  'pipe:travel': (data: { destinationNodeId: string }) => void;
   // Death choice (ghost, lobby, leave)
   'death:choice': (data: { choice: 'ghost' | 'lobby' | 'leave' }) => void;
 }
@@ -121,7 +121,7 @@ export interface ServerEvents {
   'vote:confirmed': () => void;
   'vote:result': (data: { ejectedId: string | null; votes: Record<string, string | null> }) => void;
   'game:ended': (data: {
-    winner: 'crew' | 'shadow';
+    winner: 'crew' | 'shadow' | 'draw';
     reason: string;
     roles: Record<string, { name: string; color: string; role: string }>;
     stats: { tasksCompleted: number; totalTasks: number; gameDurationSec: number };

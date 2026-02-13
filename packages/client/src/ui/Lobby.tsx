@@ -46,39 +46,9 @@ export function Lobby() {
   const allReady = lobbyPlayers.length >= 2 && lobbyPlayers.every((p) => readyStates[p.id]);
 
   return (
-    <div style={s.overlay}>
-      {/* Chat sidebar */}
-      <div
-        style={{
-          position: 'fixed',
-          top: 0,
-          right: 0,
-          width: 300,
-          height: '100vh',
-          background: s.colors.surface,
-          borderLeft: `1px solid ${s.colors.border}`,
-          zIndex: 20,
-          display: 'flex',
-          flexDirection: 'column',
-          fontFamily: "'Segoe UI', system-ui, sans-serif",
-        }}
-      >
-        <div
-          style={{
-            padding: '16px 16px 12px',
-            fontSize: 14,
-            fontWeight: 700,
-            color: s.colors.text,
-            borderBottom: `1px solid ${s.colors.border}`,
-          }}
-        >
-          Chat
-        </div>
-        <Chat />
-      </div>
-
-      {/* Main lobby card — offset to avoid sidebar */}
-      <div style={{ ...s.card, width: 480, marginRight: 300 }}>
+    <div style={{ ...s.overlay, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'flex-start', gap: 16, padding: '24px 16px' }}>
+      {/* Main lobby card */}
+      <div style={{ ...s.card, width: 480, maxWidth: '90vw', flex: '1 1 auto', minWidth: 280 }}>
         <div style={s.title}>Lobby</div>
         <div style={s.subtitle}>Room: {roomCode ?? '...'}</div>
 
@@ -360,6 +330,36 @@ export function Lobby() {
         >
           Leave Room
         </button>
+      </div>
+
+      {/* Chat sidebar — flows beside card on wide screens, below on narrow */}
+      <div
+        style={{
+          width: 300,
+          maxWidth: '90vw',
+          minWidth: 240,
+          height: 'min(500px, 70vh)',
+          background: s.colors.surface,
+          border: `1px solid ${s.colors.border}`,
+          borderRadius: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          fontFamily: "'Segoe UI', system-ui, sans-serif",
+          flex: '0 1 300px',
+        }}
+      >
+        <div
+          style={{
+            padding: '16px 16px 12px',
+            fontSize: 14,
+            fontWeight: 700,
+            color: s.colors.text,
+            borderBottom: `1px solid ${s.colors.border}`,
+          }}
+        >
+          Chat
+        </div>
+        <Chat />
       </div>
     </div>
   );

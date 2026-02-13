@@ -160,6 +160,7 @@ function buildLobbyPlayers(room: RoomData): LobbyPlayer[] {
         name: playerData.name,
         isHost: session.socketId === room.hostId,
         color: playerData.color,
+        ready: playerData.ready,
       });
     }
   }
@@ -189,7 +190,7 @@ function buildGameState(room: RoomData) {
 
 // ===== Game End Logic =====
 
-function endGame(room: RoomData, winner: 'crew' | 'shadow', reason: string) {
+function endGame(room: RoomData, winner: 'crew' | 'shadow' | 'draw', reason: string) {
   if (room.phase === 'lobby') return;
 
   // Stop game loop
@@ -268,6 +269,12 @@ function checkGameEndConditions(room: RoomData) {
 
   const aliveCrew = players.filter(p => p.role === 'crew' && p.isAlive);
   const aliveShadows = players.filter(p => p.role === 'shadow' && p.isAlive);
+
+  // All players dead — draw
+  if (aliveCrew.length === 0 && aliveShadows.length === 0) {
+    endGame(room, 'draw', 'all_dead');
+    return;
+  }
 
   // All crew dead — shadows win
   if (aliveCrew.length === 0) {
@@ -1465,10 +1472,10 @@ io.on('connection', (socket) => {
     const pipeNode = room.mazeLayout.pipeNodes?.find(p => p.id === pipeNodeId);
     if (!pipeNode) return;
 
-    // Check proximity to pipe entrance (surface)
+    // Check proximity to pipe entrance (surface, generous range for prediction drift)
     const dx = gp.position[0] - pipeNode.surfacePosition[0];
     const dz = gp.position[2] - pipeNode.surfacePosition[2];
-    if (dx * dx + dz * dz > 4 * 4) return; // Must be within 4 units
+    if (dx * dx + dz * dz > 6 * 6) return; // Must be within 6 units
 
     // Teleport to underground position
     gp.position = [...pipeNode.undergroundPosition];
@@ -1492,10 +1499,10 @@ io.on('connection', (socket) => {
     const pipeNode = room.mazeLayout.pipeNodes?.find(p => p.id === pipeNodeId);
     if (!pipeNode) return;
 
-    // Check proximity to underground exit
+    // Check proximity to underground exit (generous range to account for prediction drift)
     const dx = gp.position[0] - pipeNode.undergroundPosition[0];
     const dz = gp.position[2] - pipeNode.undergroundPosition[2];
-    if (dx * dx + dz * dz > 4 * 4) return; // Must be within 4 units
+    if (dx * dx + dz * dz > 6 * 6) return; // Must be within 6 units
 
     // Teleport to surface position
     gp.position = [...pipeNode.surfacePosition];
@@ -1504,24 +1511,7 @@ io.on('connection', (socket) => {
     console.log(`[PIPE] ${gp.name} exited pipe at ${pipeNode.roomName}`);
   });
 
-  // --- Pipe: Fast-travel underground to another node ---
-  socket.on('pipe:travel', ({ destinationNodeId }) => {
-    const token = socketToSession.get(socket.id);
-    if (!token) return;
-    const sess = sessions.get(token);
-    if (!sess?.roomCode) return;
-    const room = rooms.get(sess.roomCode);
-    if (!room || room.phase !== 'playing' || !room.gamePlayers || !room.mazeLayout) return;
-    const gp = room.gamePlayers.get(token);
-    if (!gp || !gp.isAlive || !gp.isUnderground) return;
-
-    const destNode = room.mazeLayout.pipeNodes?.find(p => p.id === destinationNodeId);
-    if (!destNode) return;
-
-    gp.position = [...destNode.undergroundPosition];
-    gp.currentPipeNodeId = destinationNodeId;
-    console.log(`[PIPE] ${gp.name} traveled to ${destNode.roomName} underground`);
-  });
+  // pipe:travel removed — players now walk through tunnels instead of teleporting
 
   // --- Hacker Action (lock door / toggle light) ---
   socket.on('hacker:action', ({ targetType, targetId }) => {

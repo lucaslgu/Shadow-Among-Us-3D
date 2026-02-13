@@ -184,13 +184,18 @@ export function createDeadBody(victim: GamePlayerState): DeadBody {
 export function checkGameOver(
   gamePlayers: Map<string, GamePlayerState>,
   mazeSnapshot: MazeSnapshot,
-): { gameOver: boolean; winner?: 'crew' | 'shadow'; reason?: string } {
+): { gameOver: boolean; winner?: 'crew' | 'shadow' | 'draw'; reason?: string } {
   let aliveCrew = 0;
   let aliveShadow = 0;
   for (const [, gp] of gamePlayers) {
     if (!gp.isAlive) continue;
     if (gp.role === 'crew') aliveCrew++;
     else if (gp.role === 'shadow') aliveShadow++;
+  }
+
+  // All players dead — draw
+  if (aliveCrew === 0 && aliveShadow === 0) {
+    return { gameOver: true, winner: 'draw', reason: 'Everyone perished!' };
   }
 
   // All shadows eliminated
@@ -279,6 +284,13 @@ export function startGameLoop(
       dynamicWallStates: mazeSnapshot.dynamicWallStates,
       muralhaWalls,
     };
+    // Underground collision context (pipe tunnel walls only)
+    const undergroundCollisionCtx: CollisionContext = {
+      walls: [],
+      doorStates: {},
+      dynamicWallStates: {},
+      pipeWalls: mazeLayout.pipeWalls,
+    };
 
     // Check Metamorph transformation expirations
     for (const [, gp] of gamePlayers) {
@@ -315,9 +327,23 @@ export function startGameLoop(
         continue;
       }
       const skipCollision = gp.isImpermeable;
+      // Underground players use pipe tunnel collision, surface players use maze collision
+      const ctx = gp.isUnderground ? undergroundCollisionCtx : collisionCtx;
       while (gp.inputQueue.length > 0) {
         const input = gp.inputQueue.shift()!;
-        processInput(gp, input, TICK_INTERVAL / 1000, skipCollision ? undefined : collisionCtx);
+        processInput(gp, input, TICK_INTERVAL / 1000, skipCollision ? undefined : ctx);
+      }
+      // Update currentPipeNodeId based on proximity to pipe nodes
+      if (gp.isUnderground && mazeLayout.pipeNodes) {
+        gp.currentPipeNodeId = null;
+        for (const pn of mazeLayout.pipeNodes) {
+          const dx = gp.position[0] - pn.undergroundPosition[0];
+          const dz = gp.position[2] - pn.undergroundPosition[2];
+          if (dx * dx + dz * dz < 4 * 4) {
+            gp.currentPipeNodeId = pn.id;
+            break;
+          }
+        }
       }
     }
 

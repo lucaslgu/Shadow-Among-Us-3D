@@ -16,18 +16,18 @@ const STYLES = {
     overflow: 'auto',
   },
   header: {
-    padding: '24px 0 16px',
+    padding: 'clamp(12px, 3vh, 24px) 0 clamp(8px, 2vh, 16px)',
     textAlign: 'center' as const,
     width: '100%',
   },
   title: {
-    fontSize: 28,
+    fontSize: 'clamp(20px, 4vw, 28px)',
     fontWeight: 800,
     letterSpacing: 2,
     textTransform: 'uppercase' as const,
   },
   timer: {
-    fontSize: 20,
+    fontSize: 'clamp(16px, 3vw, 20px)',
     fontWeight: 700,
     color: '#fbbf24',
     marginTop: 6,
@@ -36,7 +36,7 @@ const STYLES = {
     flex: 1,
     width: '100%',
     maxWidth: 600,
-    padding: '0 16px',
+    padding: '0 clamp(8px, 2vw, 16px)',
     overflow: 'auto',
   },
   chatInput: {
@@ -54,11 +54,11 @@ const STYLES = {
   },
   playerGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
-    gap: 10,
+    gridTemplateColumns: 'repeat(auto-fill, minmax(min(130px, 40vw), 1fr))',
+    gap: 'clamp(6px, 1.5vw, 10px)',
     width: '100%',
     maxWidth: 700,
-    padding: '16px',
+    padding: 'clamp(8px, 2vw, 16px)',
   },
   playerCard: (selected: boolean, isAlive: boolean) => ({
     background: selected ? 'rgba(239, 68, 68, 0.3)' : 'rgba(255,255,255,0.06)',

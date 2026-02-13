@@ -1,26 +1,34 @@
+import { useNavigate } from 'react-router-dom';
 import { useGameStore } from '../stores/game-store.js';
 import { useNetworkStore } from '../stores/network-store.js';
 
 export function GameOverScreen() {
+  const navigate = useNavigate();
   const gameEndResult = useGameStore((s) => s.gameEndResult);
   const localRole = useGameStore((s) => s.localRole);
   const phase = useGameStore((s) => s.phase);
 
   if (phase !== 'results' || !gameEndResult) return null;
 
-  const isWinner =
+  const isDraw = gameEndResult.winner === 'draw';
+  const isWinner = !isDraw && (
     (localRole === 'crew' && gameEndResult.winner === 'crew') ||
-    (localRole === 'shadow' && gameEndResult.winner === 'shadow');
+    (localRole === 'shadow' && gameEndResult.winner === 'shadow')
+  );
 
-  const winnerLabel = gameEndResult.winner === 'crew' ? 'CREW WINS' : 'IMPOSTORS WIN';
-  const personalLabel = isWinner ? 'VICTORY!' : 'DEFEAT';
-  const personalColor = isWinner ? '#4ade80' : '#ef4444';
+  const winnerLabel = isDraw ? 'DRAW' : gameEndResult.winner === 'crew' ? 'CREW WINS' : 'IMPOSTORS WIN';
+  const personalLabel = isDraw ? 'DRAW' : isWinner ? 'VICTORY!' : 'DEFEAT';
+  const personalColor = isDraw ? '#f59e0b' : isWinner ? '#4ade80' : '#ef4444';
 
   function handleReturn() {
     const roomCode = useNetworkStore.getState().currentRoomCode;
-    useGameStore.getState().reset();
+    // Navigate BEFORE reset — delay reset so React Router processes the
+    // route change before GameGuard sees phase='lobby' and redirects to '/'
     if (roomCode) {
-      window.location.hash = `/lobby/${roomCode}`;
+      navigate(`/lobby/${roomCode}`);
+      setTimeout(() => useGameStore.getState().reset(), 50);
+    } else {
+      useGameStore.getState().reset();
     }
   }
 
@@ -39,28 +47,28 @@ export function GameOverScreen() {
         color: '#e2e2f0',
       }}
     >
-      <div style={{ fontSize: 42, fontWeight: 900, color: personalColor, letterSpacing: 3, marginBottom: 8 }}>
+      <div style={{ fontSize: 'clamp(28px, 6vw, 42px)', fontWeight: 900, color: personalColor, letterSpacing: 3, marginBottom: 8, textAlign: 'center' }}>
         {personalLabel}
       </div>
-      <div style={{ fontSize: 20, fontWeight: 700, color: '#aabbdd', marginBottom: 6 }}>
+      <div style={{ fontSize: 'clamp(16px, 3vw, 20px)', fontWeight: 700, color: '#aabbdd', marginBottom: 6 }}>
         {winnerLabel}
       </div>
-      <div style={{ fontSize: 14, color: '#8bb4ff', marginBottom: 24 }}>
+      <div style={{ fontSize: 'clamp(12px, 2vw, 14px)', color: '#8bb4ff', marginBottom: 24, textAlign: 'center', padding: '0 16px' }}>
         {gameEndResult.reason}
       </div>
 
       {/* Stats */}
-      <div style={{ display: 'flex', gap: 24, marginBottom: 24, fontSize: 13, color: '#888' }}>
+      <div style={{ display: 'flex', gap: 'clamp(12px, 3vw, 24px)', marginBottom: 24, fontSize: 'clamp(11px, 1.8vw, 13px)', color: '#888', flexWrap: 'wrap', justifyContent: 'center' }}>
         <span>Tasks: {gameEndResult.stats.tasksCompleted}/{gameEndResult.stats.totalTasks}</span>
         <span>Duration: {Math.floor(gameEndResult.stats.gameDurationSec / 60)}m {gameEndResult.stats.gameDurationSec % 60}s</span>
       </div>
 
       {/* Roles reveal */}
-      <div style={{ marginBottom: 24, width: '100%', maxWidth: 500 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: '#6b6b8a', textAlign: 'center', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>
+      <div style={{ marginBottom: 24, width: '100%', maxWidth: 500, padding: '0 8px', boxSizing: 'border-box' }}>
+        <div style={{ fontSize: 'clamp(12px, 2vw, 15px)', fontWeight: 700, color: '#6b6b8a', textAlign: 'center', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>
           Role Reveal
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8, padding: '0 16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 8, padding: '0 8px' }}>
           {Object.entries(gameEndResult.roles).map(([id, info]) => (
             <div
               key={id}

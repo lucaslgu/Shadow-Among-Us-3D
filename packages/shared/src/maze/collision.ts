@@ -155,6 +155,38 @@ export function resolveCollision(
       }
     }
 
+    // Check pipe walls (underground tunnels) — always solid
+    if (context.pipeWalls) {
+      for (const pw of context.pipeWalls) {
+        const { cx, cz, distSq } = closestPointOnSegment(
+          px, pz,
+          pw.start[0], pw.start[1],
+          pw.end[0], pw.end[1],
+        );
+
+        if (distSq < radiusSq && distSq > 0.0001) {
+          const dist = Math.sqrt(distSq);
+          const overlap = radius - dist;
+          const nx = (px - cx) / dist;
+          const nz = (pz - cz) / dist;
+          px += nx * overlap;
+          pz += nz * overlap;
+          pushed = true;
+        } else if (distSq <= 0.0001) {
+          const dx = pw.end[0] - pw.start[0];
+          const dz = pw.end[1] - pw.start[1];
+          const len = Math.sqrt(dx * dx + dz * dz);
+          if (len > 0) {
+            const nx = -dz / len;
+            const nz = dx / len;
+            px += nx * radius;
+            pz += nz * radius;
+            pushed = true;
+          }
+        }
+      }
+    }
+
     if (!pushed) break; // converged
   }
 

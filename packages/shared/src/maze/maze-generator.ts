@@ -1,4 +1,4 @@
-import type { MazeCell, MazeLayout, WallSegment, DoorInfo, LightInfo, MazeRoomInfo, TaskStationInfo, TaskType, DecoObjectInfo, DecoType, ShelterZone, OxygenGeneratorInfo, EmergencyButtonInfo, PipeNode, PipeConnection } from './maze-types.js';
+import type { MazeCell, MazeLayout, WallSegment, DoorInfo, LightInfo, MazeRoomInfo, TaskStationInfo, TaskType, DecoObjectInfo, DecoType, ShelterZone, OxygenGeneratorInfo, EmergencyButtonInfo, PipeNode, PipeConnection, PipeWall } from './maze-types.js';
 import { TASK_REGISTRY, TASK_TYPES_BY_DIFFICULTY } from './task-registry.js';
 
 // ═══════════════════════════════════════════════════════════════
@@ -911,6 +911,9 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
     position: [0, 0, 0],
   };
 
+  // ── Generate underground pipe tunnel collision walls ──
+  const pipeWalls = generatePipeWalls(pipeNodes, pipeConnections);
+
   return {
     seed,
     gridSize: GRID_SIZE,
@@ -928,7 +931,118 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
     emergencyButton,
     pipeNodes,
     pipeConnections,
+    pipeWalls,
   };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Underground pipe tunnel wall generation (collision boundaries)
+// ═══════════════════════════════════════════════════════════════
+
+const PIPE_TUNNEL_RADIUS = 1.8;
+const PIPE_CHAMBER_RADIUS = 2.5;
+
+function generatePipeWalls(nodes: PipeNode[], connections: PipeConnection[]): PipeWall[] {
+  if (nodes.length === 0) return [];
+
+  const nodeMap = new Map<string, PipeNode>();
+  for (const n of nodes) nodeMap.set(n.id, n);
+
+  // Track which connections each node has (for chamber wall generation)
+  const nodeConnections = new Map<string, Array<{ other: PipeNode; dirX: number; dirZ: number; angle: number }>>();
+  for (const n of nodes) nodeConnections.set(n.id, []);
+
+  const walls: PipeWall[] = [];
+  const R = PIPE_TUNNEL_RADIUS;
+  const CR = PIPE_CHAMBER_RADIUS;
+
+  // Generate tunnel side walls for each connection
+  for (const conn of connections) {
+    const a = nodeMap.get(conn.nodeA);
+    const b = nodeMap.get(conn.nodeB);
+    if (!a || !b) continue;
+
+    const ax = a.undergroundPosition[0], az = a.undergroundPosition[2];
+    const bx = b.undergroundPosition[0], bz = b.undergroundPosition[2];
+    const dx = bx - ax, dz = bz - az;
+    const len = Math.sqrt(dx * dx + dz * dz);
+    if (len < CR * 2.5) continue; // Too close, skip
+
+    const dirX = dx / len, dirZ = dz / len;
+    const perpX = -dirZ, perpZ = dirX;
+
+    // Track connection directions at each node
+    nodeConnections.get(a.id)!.push({ other: b, dirX, dirZ, angle: Math.atan2(dirZ, dirX) });
+    nodeConnections.get(b.id)!.push({ other: a, dirX: -dirX, dirZ: -dirZ, angle: Math.atan2(-dirZ, -dirX) });
+
+    // Start/end pulled inward by chamber radius
+    const sax = ax + dirX * CR, saz = az + dirZ * CR;
+    const sbx = bx - dirX * CR, sbz = bz - dirZ * CR;
+
+    // Left wall
+    walls.push({
+      start: [sax + perpX * R, saz + perpZ * R],
+      end: [sbx + perpX * R, sbz + perpZ * R],
+    });
+    // Right wall
+    walls.push({
+      start: [sax - perpX * R, saz - perpZ * R],
+      end: [sbx - perpX * R, sbz - perpZ * R],
+    });
+  }
+
+  // Generate chamber boundary walls at each node
+  for (const node of nodes) {
+    const conns = nodeConnections.get(node.id)!;
+    const nx = node.undergroundPosition[0], nz = node.undergroundPosition[2];
+
+    if (conns.length === 0) continue;
+
+    // Sort connections by angle
+    conns.sort((a, b) => a.angle - b.angle);
+
+    // For each pair of adjacent connections, create a wall segment closing the gap
+    for (let i = 0; i < conns.length; i++) {
+      const curr = conns[i];
+      const next = conns[(i + 1) % conns.length];
+
+      // Right edge of current tunnel opening at chamber boundary
+      // Perpendicular right = (dirZ, -dirX)
+      const currRightX = nx + curr.dirX * CR + curr.dirZ * R;
+      const currRightZ = nz + curr.dirZ * CR - curr.dirX * R;
+
+      // Left edge of next tunnel opening at chamber boundary
+      // Perpendicular left = (-dirZ, dirX)
+      const nextLeftX = nx + next.dirX * CR - next.dirZ * R;
+      const nextLeftZ = nz + next.dirZ * CR + next.dirX * R;
+
+      // Calculate angular gap between the two edges
+      const edgeAngleCurr = Math.atan2(currRightZ - nz, currRightX - nx);
+      const edgeAngleNext = Math.atan2(nextLeftZ - nz, nextLeftX - nx);
+
+      // Determine the angular sweep (going counter-clockwise from curr to next)
+      let sweep = edgeAngleNext - edgeAngleCurr;
+      if (sweep < 0) sweep += Math.PI * 2;
+
+      // If sweep is very small, just one wall segment suffices
+      if (sweep < 0.01) continue;
+
+      // Create arc wall segments (approximate with line segments)
+      const arcSegments = Math.max(1, Math.ceil(sweep / (Math.PI / 4))); // ~45° per segment
+      let prevX = currRightX, prevZ = currRightZ;
+      for (let s = 1; s <= arcSegments; s++) {
+        const t = s / arcSegments;
+        const angle = edgeAngleCurr + sweep * t;
+        const ptX = s === arcSegments ? nextLeftX : nx + Math.cos(angle) * CR;
+        const ptZ = s === arcSegments ? nextLeftZ : nz + Math.sin(angle) * CR;
+        walls.push({ start: [prevX, prevZ], end: [ptX, ptZ] });
+        prevX = ptX;
+        prevZ = ptZ;
+      }
+    }
+  }
+
+  return walls;
 }
 
 // ═══════════════════════════════════════════════════════════════

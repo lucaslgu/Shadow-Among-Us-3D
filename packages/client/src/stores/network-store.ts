@@ -162,11 +162,17 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
       // Detect if returning to lobby mid-game (was in playing phase)
       const currentPhase = useGameStore.getState().phase;
       const isReturningFromGame = currentPhase === 'playing' || currentPhase === 'loading';
+      // Build readyStates from lobby players
+      const readyStates: Record<string, boolean> = {};
+      for (const p of lobbyPlayers) {
+        readyStates[p.id] = p.ready;
+      }
       set({
         currentRoomCode: roomCode,
         roomError: null,
         pendingJoinRoom: null,
         lobbyPlayers,
+        readyStates,
         waitingForGame: isReturningFromGame,
       });
       if (isReturningFromGame) {
@@ -183,10 +189,16 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
     socket.on('room:reconnected', ({ gameState, lobbyPlayers }) => {
       const roomCode = gameState.roomCode;
       console.log(`[Client] Reconnected to room ${roomCode}`);
+      // Build readyStates from lobby players
+      const readyStates: Record<string, boolean> = {};
+      for (const p of lobbyPlayers) {
+        readyStates[p.id] = p.ready;
+      }
       set({
         currentRoomCode: roomCode,
         roomError: null,
         lobbyPlayers,
+        readyStates,
       });
       // Navigate to lobby
       navigateFn?.(`/lobby/${roomCode}`);
@@ -197,7 +209,12 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
     });
 
     socket.on('room:players', ({ players }) => {
-      set({ lobbyPlayers: players });
+      // Sync readyStates from lobby players broadcast
+      const readyStates: Record<string, boolean> = {};
+      for (const p of players) {
+        readyStates[p.id] = p.ready;
+      }
+      set({ lobbyPlayers: players, readyStates });
     });
 
     socket.on('room:kicked', ({ reason }) => {
@@ -316,20 +333,33 @@ export const useNetworkStore = create<NetworkState>((set, get) => ({
       gs.setGameEndResult(winner, reason, roles, stats);
       gs.setPhase('results');
       set({ readyStates: {}, waitingForGame: false });
-      // Navigate to lobby after showing results for 5 seconds
+
+      // Release pointer lock so the user can interact with the results screen
+      if (document.pointerLockElement) {
+        document.exitPointerLock();
+      }
+
+      // Auto-return to lobby after 10 seconds
+      // IMPORTANT: reset() must be delayed after navigate() to avoid
+      // GameGuard redirecting to '/' before the route changes
       const roomCode = get().currentRoomCode;
       setTimeout(() => {
-        useGameStore.getState().reset();
-        if (roomCode) navigateFn?.(`/lobby/${roomCode}`);
-      }, 5000);
+        if (roomCode) {
+          navigateFn?.(`/lobby/${roomCode}`);
+          // Delay reset to let React Router process the navigation first
+          setTimeout(() => useGameStore.getState().reset(), 50);
+        } else {
+          useGameStore.getState().reset();
+        }
+      }, 10000);
     });
 
     socket.on('game:player-returned-to-lobby', ({ playerName }) => {
       useGameStore.getState().addChatMessage({
         id: `system-${Date.now()}`,
         playerId: 'system',
-        playerName: 'Sistema',
-        text: `${playerName} voltou ao lobby.`,
+        playerName: 'System',
+        text: `${playerName} returned to the lobby.`,
         timestamp: Date.now(),
       });
     });

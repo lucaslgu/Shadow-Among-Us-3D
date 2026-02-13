@@ -86,6 +86,12 @@ export interface PipeConnection {
   nodeB: string;  // PipeNode id
 }
 
+/** Simple wall segment for underground pipe tunnel collision */
+export interface PipeWall {
+  start: [number, number]; // (x, z) underground coords
+  end: [number, number];   // (x, z) underground coords
+}
+
 // Static layout — sent once at game start
 export interface MazeLayout {
   seed: number;
@@ -104,6 +110,7 @@ export interface MazeLayout {
   emergencyButton: EmergencyButtonInfo;
   pipeNodes: PipeNode[];
   pipeConnections: PipeConnection[];
+  pipeWalls: PipeWall[];
 }
 
 // Temporary barrier wall created by the MURALHA power
@@ -194,4 +201,5 @@ export interface CollisionContext {
   doorStates: Record<string, DoorState>;
   dynamicWallStates: Record<string, boolean>;
   muralhaWalls?: MuralhaWall[];
+  pipeWalls?: PipeWall[];
 }

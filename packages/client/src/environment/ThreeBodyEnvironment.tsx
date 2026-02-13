@@ -124,9 +124,9 @@ const ERA_PRESETS: Record<AtmosphereEra, EraVisuals> = {
     ambientColor: new THREE.Color('#ff4400'),
   },
   chaosIce: {
-    fogColor: new THREE.Color('#0a1020'),
-    fogNear: 2,
-    fogFar: 35,
+    fogColor: new THREE.Color('#0c1525'),
+    fogNear: 1,
+    fogFar: 22,
     ambientIntensity: 0.02,
     ambientColor: new THREE.Color('#334466'),
   },
@@ -820,9 +820,24 @@ function ParticleEffects({ activeEra }: { activeEra: AtmosphereEra }) {
         </>
       )}
 
-      {/* ── Chaos Ice: multi-layer volumetric blizzard ── */}
+      {/* ── Chaos Ice: multi-layer volumetric blizzard + dense fog ── */}
       {iceOpacity > 0.01 && (
         <>
+          {/* === DENSE FOG LAYERS (visibility obstruction) === */}
+          {/* Primary fog bank at eye level (large, slow drift) */}
+          <Sparkles count={120} scale={[80, 8, 80]} size={18} speed={0.08}
+            color="#1a2a44" opacity={iceOpacity * 0.55} noise={0.12} />
+          {/* Secondary fog — mid-height white mist patches */}
+          <Sparkles count={90} scale={[100, 12, 100]} size={22} speed={0.04}
+            color="#2a3a55" opacity={iceOpacity * 0.4} noise={0.08} />
+          {/* Low rolling ground fog (very large, almost static) */}
+          <Sparkles count={100} scale={[100, 3, 100]} size={25} speed={0.02}
+            color="#3a4a66" opacity={iceOpacity * 0.5} noise={0.05} />
+          {/* Wispy high fog (scattered, subtle) */}
+          <Sparkles count={50} scale={[120, 20, 120]} size={15} speed={0.15}
+            color="#223355" opacity={iceOpacity * 0.3} noise={0.2} />
+
+          {/* === BLIZZARD PARTICLES === */}
           {/* Dense blizzard (main snowfall) */}
           <Sparkles count={250} scale={[100, 60, 100]} size={3} speed={1.2}
             color="#ddeeff" opacity={iceOpacity * 0.9} noise={0.6} />

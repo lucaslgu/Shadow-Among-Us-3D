@@ -23,7 +23,7 @@ export const overlay: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'flex-start',
   overflowY: 'auto',
-  padding: '40px 0',
+  padding: 'clamp(16px, 4vh, 40px) clamp(8px, 2vw, 24px)',
   fontFamily: "'Segoe UI', system-ui, sans-serif",
   color: colors.text,
   zIndex: 10,
@@ -33,7 +33,7 @@ export const card: CSSProperties = {
   background: colors.surface,
   border: `1px solid ${colors.border}`,
   borderRadius: 12,
-  padding: 32,
+  padding: 'clamp(16px, 3vw, 32px)',
   width: 420,
   maxWidth: '90vw',
 };
@@ -44,7 +44,7 @@ export const cardWide: CSSProperties = {
 };
 
 export const title: CSSProperties = {
-  fontSize: 28,
+  fontSize: 'clamp(22px, 4vw, 28px)',
   fontWeight: 700,
   marginBottom: 4,
   letterSpacing: '-0.5px',
