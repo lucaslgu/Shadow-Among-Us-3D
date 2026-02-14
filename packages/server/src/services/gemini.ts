@@ -232,6 +232,177 @@ export async function generateCosmicScenario(): Promise<CosmicScenario> {
 // Validation helpers
 // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+// Prediction: Gemini predicts player future positions
+// ═══════════════════════════════════════════════════════════════
+
+const PREDICTION_TIMEOUT_MS = 5000;
+
+export interface PredictionInput {
+  players: Array<{
+    id: string;
+    name: string;
+    currentX: number;
+    currentZ: number;
+    recentPositions: Array<{ x: number; z: number; secAgo: number }>;
+  }>;
+  currentEra: string;
+  upcomingPhases: Array<{ era: string; startsInSec: number; durationSec: number; description: string }>;
+  mapSize: number;
+}
+
+export interface PredictionResult {
+  predictedPositions: Record<string, { x: number; z: number }>;
+}
+
+const PREDICTION_PROMPT = `You are an AI predicting player movement in a maze-based multiplayer game. The game takes place on a space station with rooms connected by corridors.
+
+Given each player's recent position history (x, z coordinates over the last 20-30 seconds), predict where they will be 20-30 seconds in the future.
+
+Consider:
+- Players tend to move toward task stations (scattered around the map in rooms)
+- Players may reverse direction, explore rooms, or chase other players
+- During chaos eras, players tend to seek shelter (enclosed rooms with closed doors)
+- During stable eras, players spread out more to do tasks
+- The map is bounded by the map size on both axes
+- Players move at roughly 4-6 units per second
+
+For each player, provide your best predicted x and z coordinates.`;
+
+const PREDICTION_RESPONSE_SCHEMA = {
+  type: 'OBJECT' as const,
+  properties: {
+    predictions: {
+      type: 'ARRAY' as const,
+      items: {
+        type: 'OBJECT' as const,
+        properties: {
+          id: { type: 'STRING' as const },
+          x: { type: 'NUMBER' as const },
+          z: { type: 'NUMBER' as const },
+        },
+        required: ['id', 'x', 'z'],
+      },
+    },
+  },
+  required: ['predictions'],
+};
+
+export async function predictPlayerPositions(input: PredictionInput): Promise<PredictionResult> {
+  if (!GEMINI_API_KEY) {
+    console.log('[Gemini] No API key — using linear extrapolation fallback');
+    return linearExtrapolation(input);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PREDICTION_TIMEOUT_MS);
+
+  try {
+    const halfMap = input.mapSize / 2;
+    const prompt = `${PREDICTION_PROMPT}
+
+Current game state:
+- Map size: ${input.mapSize}x${input.mapSize} (coordinates from -${halfMap} to ${halfMap})
+- Current era: ${input.currentEra}
+- Upcoming eras: ${input.upcomingPhases.map(p => `${p.era} in ${Math.round(p.startsInSec)}s (${p.durationSec}s long)`).join(', ')}
+
+Player data:
+${input.players.map(p => `Player "${p.name}" (id: ${p.id}):
+  Current: (${p.currentX.toFixed(1)}, ${p.currentZ.toFixed(1)})
+  Recent: ${p.recentPositions.slice(0, 10).map(rp => `(${rp.x.toFixed(1)},${rp.z.toFixed(1)}) ${rp.secAgo.toFixed(0)}s ago`).join(' → ')}`).join('\n')}
+
+Predict each player's position 25 seconds from now.`;
+
+    const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: PREDICTION_RESPONSE_SCHEMA,
+          temperature: 0.7,
+        },
+      }),
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      console.error(`[Gemini] Prediction API error: ${response.status}`);
+      return linearExtrapolation(input);
+    }
+
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      console.error('[Gemini] No text in prediction response');
+      return linearExtrapolation(input);
+    }
+
+    const parsed = JSON.parse(text);
+    const result: Record<string, { x: number; z: number }> = {};
+
+    for (const pred of parsed.predictions ?? []) {
+      result[pred.id] = {
+        x: Math.max(-halfMap, Math.min(halfMap, pred.x)),
+        z: Math.max(-halfMap, Math.min(halfMap, pred.z)),
+      };
+    }
+
+    console.log(`[Gemini] Predicted positions for ${Object.keys(result).length} players`);
+    return { predictedPositions: result };
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.error(`[Gemini] Prediction timed out after ${PREDICTION_TIMEOUT_MS}ms`);
+    } else {
+      console.error('[Gemini] Prediction error:', err);
+    }
+    return linearExtrapolation(input);
+  }
+}
+
+function linearExtrapolation(input: PredictionInput): PredictionResult {
+  const result: Record<string, { x: number; z: number }> = {};
+  const halfMap = input.mapSize / 2;
+
+  for (const player of input.players) {
+    const positions = player.recentPositions;
+    if (positions.length < 2) {
+      result[player.id] = { x: player.currentX, z: player.currentZ };
+      continue;
+    }
+
+    // Use last 5 positions to compute average velocity
+    const recent = positions.slice(0, Math.min(5, positions.length));
+    const oldest = recent[recent.length - 1];
+    const newest = recent[0];
+    const dtSec = oldest.secAgo - newest.secAgo;
+
+    if (dtSec <= 0) {
+      result[player.id] = { x: player.currentX, z: player.currentZ };
+      continue;
+    }
+
+    const vx = (newest.x - oldest.x) / dtSec;
+    const vz = (newest.z - oldest.z) / dtSec;
+
+    // Extrapolate 25 seconds forward, clamped to map bounds
+    result[player.id] = {
+      x: Math.max(-halfMap, Math.min(halfMap, player.currentX + vx * 25)),
+      z: Math.max(-halfMap, Math.min(halfMap, player.currentZ + vz * 25)),
+    };
+  }
+
+  return { predictedPositions: result };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Validation helpers
+// ═══════════════════════════════════════════════════════════════
+
 function validatePhaseTimeline(phases: CosmicScenario['phases']): void {
   if (phases[0].startSec !== 0) {
     throw new Error('First phase must start at 0');

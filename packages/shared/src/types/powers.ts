@@ -8,6 +8,7 @@ export enum PowerType {
   MIND_CONTROLLER = 'mind_controller',
   IMPERMEABLE = 'impermeable',
   MURALHA = 'muralha',
+  PREDICTION = 'prediction',
 }
 
 export interface PowerConfig {
@@ -115,5 +116,15 @@ export const POWER_CONFIGS: Record<PowerType, PowerConfig> = {
     requiresTarget: true,
     requiresLocation: false,
     targetRange: 30,
+  },
+  [PowerType.PREDICTION]: {
+    type: PowerType.PREDICTION,
+    displayName: 'Previsão',
+    description: 'Open a map showing player positions and AI-predicted future locations for 15 seconds. 2 charges.',
+    duration: 15000,
+    cooldown: 25000,
+    usesPerMatch: 2,
+    requiresTarget: false,
+    requiresLocation: false,
   },
 };

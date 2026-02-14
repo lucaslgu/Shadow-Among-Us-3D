@@ -17,8 +17,8 @@ import type {
 } from '@shadow/shared';
 import { DEFAULT_GAME_SETTINGS, PowerType, POWER_CONFIGS, generateMaze, createInitialMazeSnapshot } from '@shadow/shared';
 import type { CosmicScenario } from '@shadow/shared';
-import { startGameLoop, activatePower, deactivatePower, findNearbyPlayers, attemptKill, interactDoor, lockDoor, startTask, completeTask, cancelTask, ghostStartTask, checkGameOver, createDeadBody, MAX_HEALTH, type GamePlayerState, type DeadBody } from './game/game-loop.js';
-import { generateCosmicScenario } from './services/gemini.js';
+import { startGameLoop, activatePower, deactivatePower, findNearbyPlayers, attemptKill, interactDoor, lockDoor, startTask, completeTask, cancelTask, ghostStartTask, checkGameOver, createDeadBody, MAX_HEALTH, getPositionHistories, type GamePlayerState, type DeadBody } from './game/game-loop.js';
+import { generateCosmicScenario, predictPlayerPositions } from './services/gemini.js';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
 const IS_DEV = process.env.NODE_ENV !== 'production';
@@ -1095,7 +1095,90 @@ io.on('connection', (socket) => {
     if (!room || room.phase !== 'playing' || !room.gamePlayers) return;
     const gp = room.gamePlayers.get(token);
     if (!gp || !gp.isAlive) return;
-    activatePower(io, room.roomCode, gp, room.gamePlayers, targetId, room.mazeSnapshot ?? undefined, wallPosition, room.currentEra, teleportPosition, teleportFromMap);
+    const activated = activatePower(io, room.roomCode, gp, room.gamePlayers, targetId, room.mazeSnapshot ?? undefined, wallPosition, room.currentEra, teleportPosition, teleportFromMap);
+
+    // If Prediction power was just activated, send data to the player
+    if (activated && (gp.power as PowerType) === PowerType.PREDICTION && gp.powerActive) {
+      // 1. Collect current positions of all alive players (except the activator)
+      const currentPositions: Record<string, { x: number; z: number; color: string; name: string }> = {};
+      for (const [, otherGp] of room.gamePlayers) {
+        if (!otherGp.isAlive || otherGp.socketId === gp.socketId) continue;
+        currentPositions[otherGp.socketId] = {
+          x: otherGp.position[0],
+          z: otherGp.position[2],
+          color: otherGp.color,
+          name: otherGp.name,
+        };
+      }
+
+      // 2. Compute upcoming eras
+      const gameTimeSec = room.gameStartTime ? (Date.now() - room.gameStartTime) / 1000 : 0;
+      const upcomingEras: Array<{ era: string; startsIn: number; duration: number; description: string }> = [];
+      if (room.cosmicScenario) {
+        for (const phase of room.cosmicScenario.phases) {
+          if (phase.endSec > gameTimeSec && upcomingEras.length < 3) {
+            upcomingEras.push({
+              era: phase.era,
+              startsIn: Math.max(0, phase.startSec - gameTimeSec),
+              duration: phase.endSec - phase.startSec,
+              description: phase.description,
+            });
+          }
+        }
+      }
+
+      // 3. Send immediate data (current positions + eras) while Gemini prediction loads
+      socket.emit('prediction:data', {
+        currentPositions,
+        predictedPositions: {},
+        upcomingEras,
+      });
+
+      // 4. Async Gemini prediction call
+      const now = Date.now();
+      const histories = getPositionHistories();
+      const predictionInput = {
+        players: Array.from(room.gamePlayers.entries())
+          .filter(([, p]) => p.isAlive && p.socketId !== gp.socketId)
+          .map(([tk, p]) => {
+            const history = histories.get(tk) ?? [];
+            return {
+              id: p.socketId,
+              name: p.name,
+              currentX: p.position[0],
+              currentZ: p.position[2],
+              recentPositions: history
+                .slice()
+                .reverse()
+                .map(h => ({
+                  x: h.x,
+                  z: h.z,
+                  secAgo: (now - h.timestamp) / 1000,
+                })),
+            };
+          }),
+        currentEra: room.currentEra ?? 'stable',
+        upcomingPhases: upcomingEras.map(e => ({
+          era: e.era,
+          startsInSec: e.startsIn,
+          durationSec: e.duration,
+          description: e.description,
+        })),
+        mapSize: 180,
+      };
+
+      predictPlayerPositions(predictionInput).then(result => {
+        // Only send if player still has prediction active
+        const gpCheck = room.gamePlayers?.get(token);
+        if (gpCheck?.powerActive && gpCheck.power === PowerType.PREDICTION) {
+          socket.emit('prediction:data', {
+            currentPositions,
+            predictedPositions: result.predictedPositions,
+            upcomingEras,
+          });
+        }
+      });
+    }
   });
 
   // --- Power Deactivate ---
@@ -1873,6 +1956,7 @@ io.on('connection', (socket) => {
         damageSource: 'none',
         inShelter: false,
         doorProtection: false,
+        currentRoomId: null,
         isGhost: false,
         ghostPossessTargetToken: null,
         ghostPossessInput: null,

@@ -318,6 +318,49 @@ function OxygenBar() {
   );
 }
 
+function RoomOxygenBar() {
+  const roomOxygen = useGameStore((st) => st.roomOxygen);
+  const inShelter = useGameStore((st) => {
+    const id = st.localPlayerId;
+    return id ? st.players[id]?.inShelter ?? false : false;
+  });
+
+  // Only show when player is in a sealed room
+  if (!inShelter || roomOxygen < 0) return null;
+
+  const pct = Math.round(roomOxygen);
+  const barColor = pct > 50 ? '#66ccff' : pct > 20 ? s.colors.warning : s.colors.danger;
+  const isDepleted = pct <= 0;
+
+  return (
+    <div style={{
+      ...CARD,
+      padding: '5px 14px',
+      minWidth: 'clamp(160px, 20vw, 220px)',
+      border: isDepleted ? `1px solid ${s.colors.danger}88` : CARD.border,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: '#66ccff', letterSpacing: 1 }}>
+          O₂ da sala
+        </span>
+        <span style={{ fontSize: 10, fontWeight: 600, color: barColor }}>
+          {pct}%
+        </span>
+      </div>
+      <Bar pct={pct} color={barColor} height={4} />
+      {isDepleted && (
+        <div style={{
+          fontSize: 9, color: s.colors.danger, fontWeight: 700, marginTop: 3,
+          textAlign: 'center', letterSpacing: 0.5,
+          animation: 'oxyBlink 0.8s ease-in-out infinite',
+        }}>
+          SEM AR — ABRA A PORTA!
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OxygenGuide() {
   const mazeLayout = useGameStore((st) => st.mazeLayout);
   const shipOxygen = useGameStore((st) => st.shipOxygen);
@@ -992,6 +1035,7 @@ export function GameHUD() {
       }}>
         <DamageLabels />
         <OxygenBar />
+        <RoomOxygenBar />
         <OxygenGuide />
         <UndergroundOxygenTimer />
       </div>

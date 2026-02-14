@@ -4,7 +4,7 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { useGameStore } from '../stores/game-store.js';
 import { useNetworkStore } from '../stores/network-store.js';
-import type { PipeNode, PipeConnection } from '@shadow/shared';
+import type { PipeNode, PipeConnection, PipeWall } from '@shadow/shared';
 
 /**
  * PipeSystem — renders underground industrial tunnels with concrete walls,
@@ -16,7 +16,6 @@ const PIPE_INTERACT_RANGE = 3.5;
 const PIPE_INTERACT_RANGE_SQ = PIPE_INTERACT_RANGE * PIPE_INTERACT_RANGE;
 const TUNNEL_RADIUS = 3.0;     // half-width of corridor (collision match)
 const TUNNEL_HEIGHT = 5.0;     // floor to ceiling
-const CHAMBER_RADIUS = 3.5;    // half-size of junction room (collision match)
 const UNDERGROUND_Y = -10;
 const PIPE_GLOW = '#00ff88';
 const PIPE_GLOW_DIM = '#005533';
@@ -84,58 +83,120 @@ function PipeEntries({ nodes }: { nodes: PipeNode[] }) {
   );
 }
 
-// ── Rectangular tunnel segment (connects two nodes) ──
+// ── Tunnel walls rendered directly from collision data (single source of truth) ──
 
-function PipeTunnelSegment({ from, to }: { from: [number, number, number]; to: [number, number, number] }) {
-  const { midX, midZ, angle, length } = useMemo(() => {
-    const dx = to[0] - from[0];
-    const dz = to[2] - from[2];
-    return {
-      midX: (from[0] + to[0]) / 2,
-      midZ: (from[2] + to[2]) / 2,
-      angle: Math.atan2(dx, dz),
-      length: Math.sqrt(dx * dx + dz * dz),
-    };
-  }, [from, to]);
+const PIPE_WALL_THICKNESS = 0.3;
+
+function PipeTunnelWalls({ pipeWalls }: { pipeWalls: PipeWall[] }) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh || pipeWalls.length === 0) return;
+
+    for (let i = 0; i < pipeWalls.length; i++) {
+      const wall = pipeWalls[i];
+      const [x1, z1] = wall.start;
+      const [x2, z2] = wall.end;
+      const dx = x2 - x1;
+      const dz = z2 - z1;
+      const length = Math.sqrt(dx * dx + dz * dz);
+      if (length < 0.01) continue;
+
+      const angle = Math.atan2(dx, dz);
+      const midX = (x1 + x2) / 2;
+      const midZ = (z1 + z2) / 2;
+
+      _euler.set(0, angle, 0);
+      _quat.setFromEuler(_euler);
+      _pos.set(midX, UNDERGROUND_Y + TUNNEL_HEIGHT / 2, midZ);
+      _one.set(PIPE_WALL_THICKNESS, TUNNEL_HEIGHT, length);
+      _mat4.compose(_pos, _quat, _one);
+      mesh.setMatrixAt(i, _mat4);
+    }
+    _one.set(1, 1, 1);
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  }, [pipeWalls]);
+
+  if (pipeWalls.length === 0) return null;
 
   return (
-    <group position={[midX, UNDERGROUND_Y, midZ]} rotation={[0, angle, 0]}>
-      {/* Left concrete wall */}
-      <mesh position={[-TUNNEL_RADIUS, TUNNEL_HEIGHT / 2, 0]} rotation={[0, Math.PI / 2, 0]}>
-        <planeGeometry args={[length, TUNNEL_HEIGHT]} />
-        <meshStandardMaterial color="#3a3a35" roughness={0.85} metalness={0.1} side={THREE.DoubleSide} />
-      </mesh>
-      {/* Right concrete wall */}
-      <mesh position={[TUNNEL_RADIUS, TUNNEL_HEIGHT / 2, 0]} rotation={[0, -Math.PI / 2, 0]}>
-        <planeGeometry args={[length, TUNNEL_HEIGHT]} />
-        <meshStandardMaterial color="#3a3a35" roughness={0.85} metalness={0.1} side={THREE.DoubleSide} />
-      </mesh>
-      {/* Ceiling */}
-      <mesh position={[0, TUNNEL_HEIGHT, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[TUNNEL_RADIUS * 2, length]} />
-        <meshStandardMaterial color="#2a2a28" roughness={0.9} metalness={0.05} side={THREE.DoubleSide} />
-      </mesh>
-      {/* Left ceiling pipe (decorative) */}
-      <mesh position={[-TUNNEL_RADIUS + 0.5, TUNNEL_HEIGHT - 0.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.12, 0.12, length, 8]} />
-        <meshStandardMaterial color="#555550" roughness={0.3} metalness={0.8} />
-      </mesh>
-      {/* Right ceiling pipe (decorative) */}
-      <mesh position={[TUNNEL_RADIUS - 0.5, TUNNEL_HEIGHT - 0.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.12, 0.12, length, 8]} />
-        <meshStandardMaterial color="#555550" roughness={0.3} metalness={0.8} />
-      </mesh>
-      {/* Floor gutter (left edge) */}
-      <mesh position={[-TUNNEL_RADIUS + 0.15, 0.02, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[0.3, length]} />
-        <meshStandardMaterial color="#1a1a18" roughness={0.4} metalness={0.3} side={THREE.DoubleSide} />
-      </mesh>
-      {/* Floor gutter (right edge) */}
-      <mesh position={[TUNNEL_RADIUS - 0.15, 0.02, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[0.3, length]} />
-        <meshStandardMaterial color="#1a1a18" roughness={0.4} metalness={0.3} side={THREE.DoubleSide} />
-      </mesh>
-    </group>
+    <instancedMesh ref={meshRef} args={[undefined, undefined, pipeWalls.length]} frustumCulled={false}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial
+        color="#22252e"
+        roughness={0.35}
+        metalness={0.75}
+        side={THREE.DoubleSide}
+      />
+    </instancedMesh>
+  );
+}
+
+// ── Tunnel ceilings (instanced per connection) ──
+
+function TunnelCeilings({ nodes, connections }: { nodes: PipeNode[]; connections: PipeConnection[] }) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+
+  const ceilingData = useMemo(() => {
+    const nodeMap = new Map<string, PipeNode>();
+    for (const n of nodes) nodeMap.set(n.id, n);
+
+    const R = TUNNEL_RADIUS;
+    const result: Array<{ midX: number; midZ: number; angle: number; length: number }> = [];
+
+    for (const conn of connections) {
+      const a = nodeMap.get(conn.nodeA);
+      const b = nodeMap.get(conn.nodeB);
+      if (!a || !b) continue;
+
+      const ax = a.undergroundPosition[0], az = a.undergroundPosition[2];
+      const bx = b.undergroundPosition[0], bz = b.undergroundPosition[2];
+      const dx = bx - ax, dz = bz - az;
+      const fullLen = Math.sqrt(dx * dx + dz * dz);
+      if (fullLen < R * 2.5) continue;
+
+      const dirX = dx / fullLen, dirZ = dz / fullLen;
+      const sax = ax + dirX * R, saz = az + dirZ * R;
+      const sbx = bx - dirX * R, sbz = bz - dirZ * R;
+      const segLen = Math.sqrt((sbx - sax) ** 2 + (sbz - saz) ** 2);
+
+      result.push({
+        midX: (sax + sbx) / 2,
+        midZ: (saz + sbz) / 2,
+        angle: Math.atan2(dx, dz),
+        length: segLen,
+      });
+    }
+    return result;
+  }, [nodes, connections]);
+
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh || ceilingData.length === 0) return;
+
+    for (let i = 0; i < ceilingData.length; i++) {
+      const c = ceilingData[i];
+      _euler.set(0, c.angle, 0);
+      _quat.setFromEuler(_euler);
+      _pos.set(c.midX, UNDERGROUND_Y + TUNNEL_HEIGHT, c.midZ);
+      _one.set(TUNNEL_RADIUS * 2, 0.1, c.length);
+      _mat4.compose(_pos, _quat, _one);
+      mesh.setMatrixAt(i, _mat4);
+    }
+    _one.set(1, 1, 1);
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  }, [ceilingData]);
+
+  if (ceilingData.length === 0) return null;
+
+  return (
+    <instancedMesh ref={meshRef} args={[undefined, undefined, ceilingData.length]} frustumCulled={false}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial color="#1a1c1e" roughness={0.5} metalness={0.6} />
+    </instancedMesh>
   );
 }
 
@@ -317,9 +378,9 @@ function NodeChamber({ node }: { node: PipeNode }) {
 
   return (
     <group position={[x, y, z]}>
-      {/* Chamber ceiling */}
+      {/* Chamber ceiling (covers the junction area) */}
       <mesh position={[0, TUNNEL_HEIGHT, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[CHAMBER_RADIUS * 2, CHAMBER_RADIUS * 2]} />
+        <planeGeometry args={[TUNNEL_RADIUS * 2, TUNNEL_RADIUS * 2]} />
         <meshStandardMaterial color="#2a2a28" roughness={0.9} metalness={0.05} side={THREE.DoubleSide} />
       </mesh>
 
@@ -383,11 +444,7 @@ function NodeChamber({ node }: { node: PipeNode }) {
 const PIPE_VISUAL_RANGE_SQ = 25 * 25;
 
 function UndergroundTunnels({ nodes, connections }: { nodes: PipeNode[]; connections: PipeConnection[] }) {
-  const nodeMap = useMemo(() => {
-    const map = new Map<string, PipeNode>();
-    for (const n of nodes) map.set(n.id, n);
-    return map;
-  }, [nodes]);
+  const pipeWalls = useGameStore((st) => st.mazeLayout?.pipeWalls) ?? [];
 
   const [nearbyNodeIds, setNearbyNodeIds] = useState<Set<string>>(() => new Set());
 
@@ -412,12 +469,6 @@ function UndergroundTunnels({ nodes, connections }: { nodes: PipeNode[]; connect
     });
   });
 
-  const visibleConnections = useMemo(() => {
-    return connections.filter(
-      (conn) => nearbyNodeIds.has(conn.nodeA) || nearbyNodeIds.has(conn.nodeB),
-    );
-  }, [connections, nearbyNodeIds]);
-
   return (
     <group>
       {/* Ceiling void blocker */}
@@ -435,13 +486,11 @@ function UndergroundTunnels({ nodes, connections }: { nodes: PipeNode[]; connect
       {/* Ambient underground light */}
       <ambientLight intensity={0.15} color="#0a3320" />
 
-      {/* Rectangular tunnel segments (only nearby) */}
-      {visibleConnections.map((conn) => {
-        const a = nodeMap.get(conn.nodeA);
-        const b = nodeMap.get(conn.nodeB);
-        if (!a || !b) return null;
-        return <PipeTunnelSegment key={`${conn.nodeA}-${conn.nodeB}`} from={a.undergroundPosition} to={b.undergroundPosition} />;
-      })}
+      {/* Tunnel walls — rendered directly from collision data (single source of truth) */}
+      <PipeTunnelWalls pipeWalls={pipeWalls} />
+
+      {/* Tunnel ceilings (instanced per connection) */}
+      <TunnelCeilings nodes={nodes} connections={connections} />
 
       {/* Ceiling support beams (instanced) */}
       <TunnelBeams nodes={nodes} connections={connections} />

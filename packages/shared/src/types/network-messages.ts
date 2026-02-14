@@ -140,6 +140,11 @@ export interface ServerEvents {
   'debug:power-changed': (data: { power: PowerType }) => void;
   'debug:role-changed': (data: { role: string; power: PowerType }) => void;
   'ghost:death-screen': (data: { cause: string; killerId: string | null }) => void;
+  'prediction:data': (data: {
+    currentPositions: Record<string, { x: number; z: number; color: string; name: string }>;
+    predictedPositions: Record<string, { x: number; z: number }>;
+    upcomingEras: Array<{ era: string; startsIn: number; duration: number; description: string }>;
+  }) => void;
 }
 
 // ===== State Snapshot (sent at 20Hz) =====
@@ -173,6 +178,7 @@ export interface PlayerSnapshot {
   currentPipeNodeId: string | null;
   undergroundTimeLeft: number; // seconds remaining (0 when on surface)
   pipeCooldownEnd: number; // timestamp when pipe re-entry is allowed (0 = no cooldown)
+  roomOxygen: number; // 0-100 oxygen level of the room the player is in (-1 = not in a room)
 }
 
 export interface StateSnapshot {

@@ -1010,7 +1010,6 @@ export function generateMaze(seed: number, playerCount: number = 4): MazeLayout 
 // ═══════════════════════════════════════════════════════════════
 
 const PIPE_TUNNEL_RADIUS = 3.0;
-const PIPE_CHAMBER_RADIUS = 3.5;
 
 function generatePipeWalls(nodes: PipeNode[], connections: PipeConnection[]): PipeWall[] {
   if (nodes.length === 0) return [];
@@ -1018,15 +1017,15 @@ function generatePipeWalls(nodes: PipeNode[], connections: PipeConnection[]): Pi
   const nodeMap = new Map<string, PipeNode>();
   for (const n of nodes) nodeMap.set(n.id, n);
 
-  // Track which connections each node has (for chamber wall generation)
-  const nodeConnections = new Map<string, Array<{ other: PipeNode; dirX: number; dirZ: number; angle: number }>>();
+  // Track connections at each node for junction closure walls
+  const nodeConnections = new Map<string, Array<{ dirX: number; dirZ: number; angle: number }>>();
   for (const n of nodes) nodeConnections.set(n.id, []);
 
   const walls: PipeWall[] = [];
   const R = PIPE_TUNNEL_RADIUS;
-  const CR = PIPE_CHAMBER_RADIUS;
 
-  // Generate tunnel side walls for each connection
+  // Generate tunnel side walls for each connection, pulled inward by R from each node center.
+  // This leaves a junction area of radius R around each node for cross-tunnel navigation.
   for (const conn of connections) {
     const a = nodeMap.get(conn.nodeA);
     const b = nodeMap.get(conn.nodeB);
@@ -1036,18 +1035,18 @@ function generatePipeWalls(nodes: PipeNode[], connections: PipeConnection[]): Pi
     const bx = b.undergroundPosition[0], bz = b.undergroundPosition[2];
     const dx = bx - ax, dz = bz - az;
     const len = Math.sqrt(dx * dx + dz * dz);
-    if (len < CR * 2.5) continue; // Too close, skip
+    if (len < R * 2.5) continue; // Too short for walls
 
     const dirX = dx / len, dirZ = dz / len;
     const perpX = -dirZ, perpZ = dirX;
 
-    // Track connection directions at each node
-    nodeConnections.get(a.id)!.push({ other: b, dirX, dirZ, angle: Math.atan2(dirZ, dirX) });
-    nodeConnections.get(b.id)!.push({ other: a, dirX: -dirX, dirZ: -dirZ, angle: Math.atan2(-dirZ, -dirX) });
+    // Track direction at each node
+    nodeConnections.get(a.id)!.push({ dirX, dirZ, angle: Math.atan2(dirZ, dirX) });
+    nodeConnections.get(b.id)!.push({ dirX: -dirX, dirZ: -dirZ, angle: Math.atan2(-dirZ, -dirX) });
 
-    // Start/end pulled inward by chamber radius
-    const sax = ax + dirX * CR, saz = az + dirZ * CR;
-    const sbx = bx - dirX * CR, sbz = bz - dirZ * CR;
+    // Walls pulled inward by R from each node center
+    const sax = ax + dirX * R, saz = az + dirZ * R;
+    const sbx = bx - dirX * R, sbz = bz - dirZ * R;
 
     // Left wall
     walls.push({
@@ -1061,54 +1060,35 @@ function generatePipeWalls(nodes: PipeNode[], connections: PipeConnection[]): Pi
     });
   }
 
-  // Generate chamber boundary walls at each node
+  // Generate straight closure walls at each node to seal gaps between tunnel openings.
+  // For each pair of adjacent tunnels (sorted by angle), a straight wall connects
+  // the left edge of one tunnel to the right edge of the next.
   for (const node of nodes) {
     const conns = nodeConnections.get(node.id)!;
-    const nx = node.undergroundPosition[0], nz = node.undergroundPosition[2];
-
     if (conns.length === 0) continue;
 
-    // Sort connections by angle
+    const nx = node.undergroundPosition[0], nz = node.undergroundPosition[2];
     conns.sort((a, b) => a.angle - b.angle);
 
-    // For each pair of adjacent connections, create a wall segment closing the gap
     for (let i = 0; i < conns.length; i++) {
       const curr = conns[i];
       const next = conns[(i + 1) % conns.length];
 
-      // Left edge of current tunnel opening at chamber boundary
-      // Perpendicular left = (-dirZ, dirX)
-      const currLeftX = nx + curr.dirX * CR - curr.dirZ * R;
-      const currLeftZ = nz + curr.dirZ * CR + curr.dirX * R;
+      // Left edge of current tunnel opening at junction boundary
+      const currLeftX = nx + curr.dirX * R - curr.dirZ * R;
+      const currLeftZ = nz + curr.dirZ * R + curr.dirX * R;
 
-      // Right edge of next tunnel opening at chamber boundary
-      // Perpendicular right = (dirZ, -dirX)
-      const nextRightX = nx + next.dirX * CR + next.dirZ * R;
-      const nextRightZ = nz + next.dirZ * CR - next.dirX * R;
+      // Right edge of next tunnel opening at junction boundary
+      const nextRightX = nx + next.dirX * R + next.dirZ * R;
+      const nextRightZ = nz + next.dirZ * R - next.dirX * R;
 
-      // Calculate angular gap between the two edges
-      const edgeAngleStart = Math.atan2(currLeftZ - nz, currLeftX - nx);
-      const edgeAngleEnd = Math.atan2(nextRightZ - nz, nextRightX - nx);
+      // Skip if the two edges are essentially the same point (perpendicular tunnels meet cleanly)
+      const gapX = nextRightX - currLeftX;
+      const gapZ = nextRightZ - currLeftZ;
+      if (gapX * gapX + gapZ * gapZ < 0.01) continue;
 
-      // Determine the angular sweep (going counter-clockwise from left of curr to right of next)
-      let sweep = edgeAngleEnd - edgeAngleStart;
-      if (sweep < 0) sweep += Math.PI * 2;
-
-      // If sweep is very small, just one wall segment suffices
-      if (sweep < 0.01) continue;
-
-      // Create arc wall segments (approximate with line segments)
-      const arcSegments = Math.max(1, Math.ceil(sweep / (Math.PI / 4))); // ~45° per segment
-      let prevX = currLeftX, prevZ = currLeftZ;
-      for (let s = 1; s <= arcSegments; s++) {
-        const t = s / arcSegments;
-        const angle = edgeAngleStart + sweep * t;
-        const ptX = s === arcSegments ? nextRightX : nx + Math.cos(angle) * CR;
-        const ptZ = s === arcSegments ? nextRightZ : nz + Math.sin(angle) * CR;
-        walls.push({ start: [prevX, prevZ], end: [ptX, ptZ] });
-        prevX = ptX;
-        prevZ = ptZ;
-      }
+      // Straight closure wall
+      walls.push({ start: [currLeftX, currLeftZ], end: [nextRightX, nextRightZ] });
     }
   }
 

@@ -1201,36 +1201,99 @@ function AtmosphereController({
 
 // ═══════════════════════════════════════════════════════════════
 // Component: SolarRays — blinding heat glare during chaosInferno
+// Uses custom shaders for realistic god rays with gaussian falloff,
+// per-ray shimmer, color gradients, and directional glare dome.
 // ═══════════════════════════════════════════════════════════════
 
-const SOLAR_RAY_MAT = new THREE.MeshBasicMaterial({
-  color: '#ffaa44',
-  transparent: true,
-  opacity: 0,
-  blending: THREE.AdditiveBlending,
-  depthWrite: false,
-  side: THREE.DoubleSide,
-});
+const SOLAR_RAY_VERT = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
 
-const SOLAR_GLARE_MAT = new THREE.MeshBasicMaterial({
-  color: '#ff8833',
+const SOLAR_RAY_FRAG = /* glsl */ `
+  uniform float uOpacity;
+  uniform float uTime;
+  uniform float uPhase;
+  varying vec2 vUv;
+  void main() {
+    // Horizontal: gaussian bell curve — bright center, transparent edges
+    float hx = abs(vUv.x - 0.5) * 2.0;
+    float horizontal = exp(-hx * hx * 6.0);
+    // Vertical: bright at top (sky), fading toward bottom (ground)
+    float vertical = pow(vUv.y, 0.4);
+    float alpha = horizontal * vertical;
+    // Per-ray shimmer with unique phase offset
+    float shimmer = 0.8 + 0.2 * sin(uTime * 1.5 + uPhase + vUv.y * 5.0);
+    alpha *= shimmer;
+    // Color: warm white core blending to deep orange at edges
+    vec3 core = vec3(1.0, 0.92, 0.75);
+    vec3 edge = vec3(1.0, 0.5, 0.12);
+    vec3 color = mix(core, edge, hx * 0.7 + (1.0 - vUv.y) * 0.3);
+    gl_FragColor = vec4(color, alpha * uOpacity);
+  }
+`;
+
+const SOLAR_GLARE_VERT = /* glsl */ `
+  varying vec3 vLocalPos;
+  void main() {
+    vLocalPos = position;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const SOLAR_GLARE_FRAG = /* glsl */ `
+  uniform float uOpacity;
+  varying vec3 vLocalPos;
+  void main() {
+    // Brighter overhead (sun direction), dimmer toward horizon
+    float ny = normalize(vLocalPos).y;
+    float topFactor = pow(max(0.0, ny), 0.6);
+    float alpha = 0.04 + topFactor * 0.18;
+    // Color: deep orange at horizon → warm white overhead
+    vec3 color = mix(vec3(1.0, 0.45, 0.1), vec3(1.0, 0.9, 0.7), topFactor);
+    gl_FragColor = vec4(color, alpha * uOpacity);
+  }
+`;
+
+const SOLAR_GLARE_GEO = new THREE.SphereGeometry(18, 16, 10);
+const SOLAR_GLARE_MAT = new THREE.ShaderMaterial({
+  vertexShader: SOLAR_GLARE_VERT,
+  fragmentShader: SOLAR_GLARE_FRAG,
+  uniforms: { uOpacity: { value: 0 } },
   transparent: true,
-  opacity: 0,
   blending: THREE.AdditiveBlending,
   depthWrite: false,
   side: THREE.BackSide,
 });
 
-const SOLAR_RAY_GEO = new THREE.PlaneGeometry(2.5, 35);
-const SOLAR_GLARE_GEO = new THREE.SphereGeometry(18, 12, 8);
-const RAY_COUNT = 8;
+const RAY_COUNT = 10;
 
-// Pre-compute ray positions and rotations
-const RAY_TRANSFORMS = Array.from({ length: RAY_COUNT }, (_, i) => {
+// Pre-compute varied ray geometries, materials, and transforms
+const RAY_DATA = Array.from({ length: RAY_COUNT }, (_, i) => {
   const angle = (i / RAY_COUNT) * Math.PI * 2;
+  const widthVar = 1.5 + (i % 3) * 1.0;   // 1.5, 2.5, 3.5
+  const heightVar = 28 + (i % 4) * 7;      // 28, 35, 42, 49
+  const radiusDist = 6 + (i % 3) * 2.5;    // 6, 8.5, 11
   return {
-    position: [Math.sin(angle) * 8, 12, Math.cos(angle) * 8] as [number, number, number],
-    rotation: [0.4 + (i % 3) * 0.1, angle, 0.15 * (i % 2 === 0 ? 1 : -1)] as [number, number, number],
+    geometry: new THREE.PlaneGeometry(widthVar, heightVar),
+    material: new THREE.ShaderMaterial({
+      vertexShader: SOLAR_RAY_VERT,
+      fragmentShader: SOLAR_RAY_FRAG,
+      uniforms: {
+        uOpacity: { value: 0 },
+        uTime: { value: 0 },
+        uPhase: { value: i * 1.7 },
+      },
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+    position: [Math.sin(angle) * radiusDist, 14, Math.cos(angle) * radiusDist] as [number, number, number],
+    rotation: [0.3 + (i % 3) * 0.12, angle, 0.1 * (i % 2 === 0 ? 1 : -1)] as [number, number, number],
   };
 });
 
@@ -1240,30 +1303,31 @@ function SolarRays({ opacity }: { opacity: number }) {
   useFrame(({ camera, clock }) => {
     const group = groupRef.current;
     if (!group) return;
-    // Follow camera position so glare always surrounds player
     group.position.set(camera.position.x, 0, camera.position.z);
-    // Slow rotation for dynamic feel
     group.rotation.y = clock.elapsedTime * 0.03;
-    // Update material opacity
-    SOLAR_RAY_MAT.opacity = opacity * 0.2;
-    SOLAR_GLARE_MAT.opacity = opacity * 0.12;
+    const t = clock.elapsedTime;
+    SOLAR_GLARE_MAT.uniforms.uOpacity.value = opacity;
+    for (const ray of RAY_DATA) {
+      ray.material.uniforms.uOpacity.value = opacity * 0.25;
+      ray.material.uniforms.uTime.value = t;
+    }
   });
 
   if (opacity < 0.01) return null;
 
   return (
     <group ref={groupRef}>
-      {/* Heat glare dome — warm additive haze around the player */}
+      {/* Heat glare dome — directional gradient, brighter overhead */}
       <mesh geometry={SOLAR_GLARE_GEO} material={SOLAR_GLARE_MAT} position={[0, 5, 0]} />
 
-      {/* God rays — tall bright planes angled from above */}
-      {RAY_TRANSFORMS.map((t, i) => (
+      {/* God rays — varied width/height planes with gaussian falloff + shimmer */}
+      {RAY_DATA.map((ray, i) => (
         <mesh
           key={i}
-          geometry={SOLAR_RAY_GEO}
-          material={SOLAR_RAY_MAT}
-          position={t.position}
-          rotation={t.rotation}
+          geometry={ray.geometry}
+          material={ray.material}
+          position={ray.position}
+          rotation={ray.rotation}
         />
       ))}
     </group>

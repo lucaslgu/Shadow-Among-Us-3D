@@ -85,6 +85,14 @@ interface GameState {
   // Hacker panel overlay
   hackerPanelOpen: boolean;
 
+  // Prediction overlay
+  predictionOverlayOpen: boolean;
+  predictionData: {
+    currentPositions: Record<string, { x: number; z: number; color: string; name: string }>;
+    predictedPositions: Record<string, { x: number; z: number }>;
+    upcomingEras: Array<{ era: string; startsIn: number; duration: number; description: string }>;
+  } | null;
+
   // Loading screen
   loadedPlayerIds: string[];
   loadingTotalPlayers: number;
@@ -92,6 +100,7 @@ interface GameState {
   // Ship oxygen
   shipOxygen: number;
   oxygenRefillPlayerId: string | null;
+  roomOxygen: number; // -1 = not in room, 0-100 = room O2 level
 
   // Ghost / Death state
   isGhost: boolean;
@@ -151,6 +160,9 @@ interface GameState {
   closeTeleportMap: () => void;
   openHackerPanel: () => void;
   closeHackerPanel: () => void;
+  openPredictionOverlay: () => void;
+  closePredictionOverlay: () => void;
+  setPredictionData: (data: GameState['predictionData']) => void;
   setLoadingProgress: (loadedPlayerIds: string[], totalPlayers: number) => void;
   setGhostState: (isGhost: boolean, deathCause: string | null) => void;
   dismissDeathScreen: () => void;
@@ -205,10 +217,13 @@ const initialState = {
   nearbyTargets: [] as NearbyTarget[],
   teleportMapOpen: false,
   hackerPanelOpen: false,
+  predictionOverlayOpen: false,
+  predictionData: null as GameState['predictionData'],
   loadedPlayerIds: [] as string[],
   loadingTotalPlayers: 0,
   shipOxygen: 100,
   oxygenRefillPlayerId: null as string | null,
+  roomOxygen: -1,
   isGhost: false,
   deathCause: null as string | null,
   showDeathScreen: false,
@@ -340,6 +355,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       lastServerSeq: snapshot.seq,
       localPosition: pos,
       localRotation: rot,
+      roomOxygen: mySnapshot.roomOxygen ?? -1,
       ...mazeUpdate,
       ...powerUpdate,
     });
@@ -407,6 +423,17 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   closeHackerPanel: () =>
     set({ hackerPanelOpen: false }),
+
+  openPredictionOverlay: () => {
+    document.exitPointerLock();
+    set({ predictionOverlayOpen: true, predictionData: null });
+  },
+
+  closePredictionOverlay: () =>
+    set({ predictionOverlayOpen: false, predictionData: null }),
+
+  setPredictionData: (data) =>
+    set({ predictionData: data }),
 
   setLoadingProgress: (loadedPlayerIds, totalPlayers) =>
     set({ loadedPlayerIds, loadingTotalPlayers: totalPlayers }),
@@ -478,5 +505,5 @@ export const useGameStore = create<GameState>((set, get) => ({
   setGameEndResult: (winner, reason, roles, stats) =>
     set({ gameEndResult: { winner, reason, roles, stats } }),
 
-  reset: () => set({ ...initialState, chatMessages: [], mazeLayout: null, mazeSnapshot: null, currentEra: null, cosmicScenario: null, eraGravity: null, eraDescription: null, activeTaskId: null, activeTaskType: null, taskOverlayVisible: false, assignedTasks: [], nearestInteractTask: null, targetingMode: false, nearbyTargets: [], loadedPlayerIds: [], loadingTotalPlayers: 0, gameEndResult: null, nearestBodyId: null, nearEmergencyButton: false, meetingPhase: null, meetingReporterId: null, meetingBodyId: null, meetingTimer: 0, voteResult: null, hasVoted: false, bodies: [], selectedGuideTaskId: null, nearestKillTargetId: null }),
+  reset: () => set({ ...initialState, chatMessages: [], mazeLayout: null, mazeSnapshot: null, currentEra: null, cosmicScenario: null, eraGravity: null, eraDescription: null, activeTaskId: null, activeTaskType: null, taskOverlayVisible: false, assignedTasks: [], nearestInteractTask: null, targetingMode: false, nearbyTargets: [], loadedPlayerIds: [], loadingTotalPlayers: 0, gameEndResult: null, nearestBodyId: null, nearEmergencyButton: false, meetingPhase: null, meetingReporterId: null, meetingBodyId: null, meetingTimer: 0, voteResult: null, hasVoted: false, bodies: [], selectedGuideTaskId: null, nearestKillTargetId: null, predictionOverlayOpen: false, predictionData: null }),
 }));

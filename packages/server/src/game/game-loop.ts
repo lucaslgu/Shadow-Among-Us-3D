@@ -40,11 +40,17 @@ const STABLE_REGEN_DPS = 10; // heal/sec during stable era
 
 // ===== Ship Oxygen Constants =====
 const MAX_SHIP_OXYGEN = 100;
-const OXYGEN_DEPLETION_RATE = 0.5;  // %/sec during extreme gravity (runs out in ~200s / ~3 chaos phases)
+const OXYGEN_DEPLETION_RATE = 0.8;  // %/sec during extreme gravity (runs out in ~125s / ~2 chaos phases)
 // No automatic regen — oxygen is only restored manually at generators
 const OXYGEN_REFILL_DURATION = 5; // seconds to complete a refill interaction
 const OXYGEN_REFILL_AMOUNT = 100; // refills to full
 const OXYGEN_REFILL_RANGE_SQ = 3.5 * 3.5; // interaction range squared
+
+// ===== Room Oxygen Constants =====
+const ROOM_OXYGEN_MAX = 100;
+const ROOM_OXYGEN_DURATION = 45; // seconds of oxygen when sealed
+const ROOM_OXYGEN_DEPLETION_RATE = ROOM_OXYGEN_MAX / ROOM_OXYGEN_DURATION; // ~2.22 %/sec
+const ROOM_OXYGEN_SUFFOCATION_DPS = 4; // damage/sec when room O2 is depleted
 
 export interface GamePlayerState {
   sessionToken: string;
@@ -97,6 +103,7 @@ export interface GamePlayerState {
   damageSource: string;
   inShelter: boolean;
   doorProtection: boolean;
+  currentRoomId: string | null;
   // Oxygen refill interaction
   oxygenRefillGeneratorId: string | null;
   oxygenRefillStartTime: number;
@@ -175,6 +182,22 @@ export interface DeadBody {
   reported: boolean;
 }
 
+// ===== Position History (for Prediction power, sampled at 1Hz) =====
+export interface PositionHistoryEntry {
+  timestamp: number;
+  x: number;
+  z: number;
+}
+
+const positionHistories = new Map<string, PositionHistoryEntry[]>();
+let lastPositionSampleTime = 0;
+const POSITION_SAMPLE_INTERVAL = 1000; // 1Hz
+const MAX_POSITION_HISTORY = 30;
+
+export function getPositionHistories(): Map<string, PositionHistoryEntry[]> {
+  return positionHistories;
+}
+
 let bodyCounter = 0;
 export function createDeadBody(victim: GamePlayerState): DeadBody {
   return {
@@ -247,9 +270,35 @@ export function startGameLoop(
   ];
   const sunSim = createSunSimulation(masses, cosmicScenario.initialConfig as 'triangle' | 'hierarchical' | 'figure8' | undefined);
   // shipOxygen is stored on mazeSnapshot so hacker:action handlers can drain it
+  positionHistories.clear();
+  lastPositionSampleTime = Date.now();
+
+  // Room oxygen — each room starts full; depletes when sealed (all doors closed)
+  const roomOxygen = new Map<string, number>();
+  for (const room of mazeLayout.rooms) {
+    roomOxygen.set(room.id, ROOM_OXYGEN_MAX);
+  }
+
   const interval = setInterval(() => {
     tickSeq++;
     const now = Date.now();
+
+    // ── Position history sampling (1Hz for Prediction power) ──
+    if (now - lastPositionSampleTime >= POSITION_SAMPLE_INTERVAL) {
+      lastPositionSampleTime = now;
+      for (const [token, gp] of gamePlayers) {
+        if (!gp.isAlive) continue;
+        let history = positionHistories.get(token);
+        if (!history) {
+          history = [];
+          positionHistories.set(token, history);
+        }
+        history.push({ timestamp: now, x: gp.position[0], z: gp.position[2] });
+        if (history.length > MAX_POSITION_HISTORY) {
+          history.shift();
+        }
+      }
+    }
 
     // ── Era cycle (from AI-generated scenario) ──
     const gameTimeSec = (now - gameStartTime) / 1000;
@@ -285,8 +334,16 @@ export function startGameLoop(
           !gp.powerActive && now >= gp.powerCooldownEnd) {
         gp.powerUsesLeft++;
         if (gp.powerUsesLeft < POWER_CONFIGS[PowerType.TELEPORT].usesPerMatch) {
-          // Still more charges to recharge — start cooldown for the next one
           gp.powerCooldownEnd = now + POWER_CONFIGS[PowerType.TELEPORT].cooldown;
+        }
+      }
+      // Recharge PREDICTION charges one at a time when cooldown expires
+      if (gp.power === PowerType.PREDICTION &&
+          gp.powerUsesLeft < POWER_CONFIGS[PowerType.PREDICTION].usesPerMatch &&
+          !gp.powerActive && now >= gp.powerCooldownEnd) {
+        gp.powerUsesLeft++;
+        if (gp.powerUsesLeft < POWER_CONFIGS[PowerType.PREDICTION].usesPerMatch) {
+          gp.powerCooldownEnd = now + POWER_CONFIGS[PowerType.PREDICTION].cooldown;
         }
       }
     }
@@ -525,6 +582,39 @@ export function startGameLoop(
       }
     }
 
+    // ── Room oxygen depletion / refill ──
+    // For each room, check if all its connected doors are closed → deplete O2
+    // If any door is open → refill back to max instantly (air flows in)
+    for (const room of mazeLayout.rooms) {
+      let allClosed = true;
+      let hasDoors = false;
+      for (const door of mazeLayout.doors) {
+        const sideOffsets: Record<string, [number, number]> = { N: [-1, 0], S: [1, 0], E: [0, 1], W: [0, -1] };
+        const [dr, dc] = sideOffsets[door.side] ?? [0, 0];
+        const isConnected =
+          (door.row === room.row && door.col === room.col) ||
+          (door.row + dr === room.row && door.col + dc === room.col);
+        if (isConnected) {
+          hasDoors = true;
+          const doorState = mazeSnapshot.doorStates[door.id];
+          if (!doorState || doorState.isOpen) {
+            allClosed = false;
+            break;
+          }
+        }
+      }
+      const currentO2 = roomOxygen.get(room.id) ?? ROOM_OXYGEN_MAX;
+      if (hasDoors && allClosed) {
+        // Sealed room — deplete oxygen
+        roomOxygen.set(room.id, Math.max(0, currentO2 - ROOM_OXYGEN_DEPLETION_RATE * dt));
+      } else {
+        // Open room — refill to max
+        if (currentO2 < ROOM_OXYGEN_MAX) {
+          roomOxygen.set(room.id, ROOM_OXYGEN_MAX);
+        }
+      }
+    }
+
     for (const [, gp] of gamePlayers) {
       if (!gp.isAlive) {
         gp.damageSource = 'none';
@@ -589,6 +679,7 @@ export function startGameLoop(
 
       gp.inShelter = inShelter;
       gp.doorProtection = false;
+      gp.currentRoomId = playerRoom ? playerRoom.id : null;
 
       // ── Directional sun exposure check ──
       // For each visible sun, determine if the player is exposed to it.
@@ -679,6 +770,15 @@ export function startGameLoop(
         damage += NO_OXYGEN_DPS * dt;
       }
 
+      // Room oxygen suffocation — sealed room ran out of O2
+      if (inShelter && playerRoom) {
+        const rO2 = roomOxygen.get(playerRoom.id) ?? ROOM_OXYGEN_MAX;
+        if (rO2 <= 0) {
+          if (!sources.includes('oxygen')) sources.push('oxygen');
+          damage += ROOM_OXYGEN_SUFFOCATION_DPS * dt;
+        }
+      }
+
       gp.damageSource = (damage > 0 && sources.length > 0) ? sources.join('+') : 'none';
 
       if (damage > 0) {
@@ -747,6 +847,9 @@ export function startGameLoop(
           ? Math.max(0, 40 - (now - gp.undergroundEnteredAt) / 1000)
           : 0,
         pipeCooldownEnd: gp.pipeCooldownEnd,
+        roomOxygen: gp.currentRoomId
+          ? Math.round(roomOxygen.get(gp.currentRoomId) ?? ROOM_OXYGEN_MAX)
+          : -1,
       };
     }
 
@@ -1035,6 +1138,17 @@ export function activatePower(
       gp.hackerDrainCount = 0;
       break;
 
+    case PowerType.PREDICTION: {
+      // Check charges remaining
+      if (gp.powerUsesLeft <= 0) {
+        gp.powerActive = false;
+        return false;
+      }
+      gp.powerUsesLeft--;
+      // Duration-based (15s), auto-deactivates via game loop
+      break;
+    }
+
     default:
       break;
   }
@@ -1121,6 +1235,10 @@ export function deactivatePower(
       gp.hackerToggledWalls = [];
       gp.hackerLockedPipes = [];
       gp.hackerDisabledGenerators = [];
+      break;
+
+    case PowerType.PREDICTION:
+      // No effects to revert — overlay is client-side
       break;
 
     default:

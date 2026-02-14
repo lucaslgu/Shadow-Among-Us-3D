@@ -23,6 +23,7 @@ import { GameEndScreen } from './ui/GameEndScreen.js';
 import { LoadingScreen } from './ui/LoadingScreen.js';
 import { TeleportMapOverlay } from './ui/TeleportMapOverlay.js';
 import { HackerPanel } from './ui/HackerPanel.js';
+import { PredictionOverlay } from './ui/PredictionOverlay.js';
 import { PipeMapOverlay } from './ui/PipeMapOverlay.js';
 import { MeetingScreen } from './ui/MeetingScreen.js';
 import { GameOverScreen } from './ui/GameOverScreen.js';
@@ -70,7 +71,7 @@ function GameNetworkBridge() {
         (input) => {
           const gameStore = useGameStore.getState();
           // Block movement input when task overlay, target selector, teleport map, hacker panel, or meeting is open
-          if (gameStore.taskOverlayVisible || gameStore.targetingMode || gameStore.teleportMapOpen || gameStore.hackerPanelOpen || gameStore.phase === 'meeting') {
+          if (gameStore.taskOverlayVisible || gameStore.targetingMode || gameStore.teleportMapOpen || gameStore.hackerPanelOpen || gameStore.predictionOverlayOpen || gameStore.phase === 'meeting') {
             input.forward = false;
             input.backward = false;
             input.left = false;
@@ -130,6 +131,9 @@ function GameNetworkBridge() {
                 // Q closes hacker panel and deactivates power
                 gameStore.closeHackerPanel();
                 socket.emit('power:deactivate');
+              } else if (gameStore.predictionOverlayOpen) {
+                // Q closes prediction overlay
+                gameStore.closePredictionOverlay();
               } else if (teleportMapOpen) {
                 // Q cancels teleport map
                 gameStore.closeTeleportMap();
@@ -141,6 +145,11 @@ function GameNetworkBridge() {
                 playPowerActivate();
                 socket.emit('power:activate', {});
                 gameStore.openHackerPanel();
+              } else if (config?.type === PowerType.PREDICTION) {
+                // Prediction: activate power and open overlay
+                playPowerActivate();
+                socket.emit('power:activate', {});
+                gameStore.openPredictionOverlay();
               } else if (config?.type === PowerType.TELEPORT) {
                 // Teleport: defer — wait for hold/release detection (handled below)
               } else if (config?.requiresTarget && config.targetRange) {
@@ -320,9 +329,22 @@ function GameNetworkBridge() {
       if (powerType === PowerType.HACKER) {
         useGameStore.getState().closeHackerPanel();
       }
+      if (powerType === PowerType.PREDICTION) {
+        useGameStore.getState().closePredictionOverlay();
+      }
     };
     socket.on('power:ended', handler as any);
     return () => { socket.off('power:ended', handler as any); };
+  }, [phase, socket]);
+
+  // Prediction data listener
+  useEffect(() => {
+    if (phase !== 'playing' || !socket) return;
+    const onPredictionData = (data: any) => {
+      useGameStore.getState().setPredictionData(data);
+    };
+    socket.on('prediction:data', onPredictionData as any);
+    return () => { socket.off('prediction:data', onPredictionData as any); };
   }, [phase, socket]);
 
   // Target selection listeners
@@ -426,6 +448,9 @@ export function App() {
 
       {/* Hacker control panel overlay */}
       {phase === 'playing' && <HackerPanel />}
+
+      {/* Prediction overlay */}
+      {phase === 'playing' && <PredictionOverlay />}
 
       {/* Underground pipe map overlay */}
       {phase === 'playing' && <PipeMapOverlay />}
